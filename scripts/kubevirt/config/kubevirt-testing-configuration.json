@@ -1,0 +1,7 @@
+{
+  "storageClassLocal": "managed-csi",
+  "storageClassHostPath": "managed-csi",
+  "storageClassRhel": "managed-csi",
+  "storageClassWindows": "managed-csi",
+  "manageStorageClasses": false
+}
