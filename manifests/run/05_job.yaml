@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ocp-virt-validation-job-_TIMESTAMP_
+  namespace: ocp-virt-validation
+spec:
+  template:
+    metadata:
+      labels:
+        app: ocp-virt-validation
+    spec:
+      serviceAccountName: ocp-virt-validation-sa
+      containers:
+        - name: ocp-virt-unified-validation
+          image: quay.io/orenc/cnv-self-validation-checkup:latest
+          imagePullPolicy: Always
+          env:
+            - name: DRY_RUN
+              value: "true"
+            - name: TIMESTAMP
+              value: _TIMESTAMP_
+            - name: KUBEVIRT_RELEASE
+              value: "v1.5.0"
+            - name: SSP_RELEASE
+              value: "v0.22.3"
+          volumeMounts:
+            - name: results-volume
+              mountPath: /results
+      restartPolicy: Never
+      volumes:
+        - name: results-volume
+          persistentVolumeClaim:
+            claimName: ocp-virt-validation-pvc-_TIMESTAMP_
+  backoffLimit: 1

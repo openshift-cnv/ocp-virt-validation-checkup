@@ -12,7 +12,7 @@ then
 fi
 export DRY_RUN_FLAG
 
-
+mkdir -p ${RESULTS_DIR}
 date -u +"%Y-%m-%dT%H:%M:%SZ" > ${RESULTS_DIR}/startTimestamp
 
 # =======
@@ -54,7 +54,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > ${RESULTS_DIR}/completionTimestamp
 # =========
 # Summarize
 # =========
-python ./summarize/junit_parser.py ${RESULTS_DIR} | tee ${RESULTS_DIR}/summary-log.txt
+python ./scripts/summarize/junit_parser.py ${RESULTS_DIR} | tee ${RESULTS_DIR}/summary-log.txt
 
 # Archive test results into tar.gz
 tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} .

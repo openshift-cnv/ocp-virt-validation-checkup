@@ -10,7 +10,7 @@ skip_tests+=('\[QUARANTINE\]')
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
 
-TESTS_BINARY="kubevirt-tests.test"
+TESTS_BINARY="kubevirt.test"
 export ARTIFACTS=${RESULTS_DIR}/${SIG}
 mkdir -p "${ARTIFACTS}"
 

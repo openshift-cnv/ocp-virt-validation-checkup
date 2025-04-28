@@ -102,8 +102,8 @@ def save_results_to_cm(tests_results):
         config.load_incluster_config()
 
     name_timestamp = os.getenv("TIMESTAMP", random.randint(1, 100))
-    config_map_name = f"cnv-validation-results-{name_timestamp}"
-    namespace = "cnv-validation"
+    config_map_name = f"ocp-virt-validation-results-{name_timestamp}"
+    namespace = "ocp-virt-validation"
     content = yaml.dump(tests_results, default_flow_style=False, sort_keys=False, allow_unicode=True)
     config_map = client.V1ConfigMap(
         metadata=client.V1ObjectMeta(name=config_map_name),
@@ -116,7 +116,7 @@ def save_results_to_cm(tests_results):
 
     if not config_map.metadata.labels:
         config_map.metadata.labels = {}
-    config_map.metadata.labels["app"] = "cnv-validation"
+    config_map.metadata.labels["app"] = "ocp-virt-validation"
 
     v1 = client.CoreV1Api()
     try:
