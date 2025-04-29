@@ -12,6 +12,13 @@ then
 fi
 export DRY_RUN_FLAG
 
+
+REGISTRY_CONFIG=$(mktemp)
+oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${REGISTRY_CONFIG}"
+VIRT_OPERATOR_IMAGE=$(oc get deployment virt-operator -n openshift-cnv -o jsonpath='{.spec.template.spec.containers[0].image}')
+KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
+export KUBEVIRT_RELEASE="v${KUBEVIRT_TAG%%-[0-9]*}"
+
 mkdir -p ${RESULTS_DIR}
 date -u +"%Y-%m-%dT%H:%M:%SZ" > ${RESULTS_DIR}/startTimestamp
 
