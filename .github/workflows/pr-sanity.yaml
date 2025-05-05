@@ -1,0 +1,27 @@
+name: Sanity Checks
+
+on:
+  push:
+    branches:
+    - main
+    - release-*
+  pull_request:
+    branches:
+    - main
+    - release-*
+
+jobs:
+  build:
+    name: Sanity Checks
+    if: github.repository == 'openshift-cnv/ocp-virt-validation-checkup'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Do sanity checks
+        run: make build
