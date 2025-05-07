@@ -20,7 +20,8 @@ KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${VIRT_OPERATOR_IMAGE} -o jso
 export KUBEVIRT_RELEASE="v${KUBEVIRT_TAG%%-[0-9]*}"
 
 mkdir -p ${RESULTS_DIR}
-date -u +"%Y-%m-%dT%H:%M:%SZ" > ${RESULTS_DIR}/startTimestamp
+START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo ${START_TIMESTAMP} > ${RESULTS_DIR}/startTimestamp
 
 # =======
 # compute
@@ -56,12 +57,13 @@ ${SCRIPT_DIR}/ssp/test-ssp.sh
 echo "SSP test suite has finished. Restoring the environment"
 ${SCRIPT_DIR}/ssp/teardown-ssp.sh
 
-date -u +"%Y-%m-%dT%H:%M:%SZ" > ${RESULTS_DIR}/completionTimestamp
+COMPLETION_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo ${COMPLETION_TIMESTAMP} > ${RESULTS_DIR}/completionTimestamp
 
 # =========
 # Summarize
 # =========
-python ./scripts/summarize/junit_parser.py ${RESULTS_DIR} | tee ${RESULTS_DIR}/summary-log.txt
+junitparser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt
 
 # Archive test results into tar.gz
 tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} .
