@@ -41,7 +41,6 @@ ${TESTS_BINARY} \
     ${GINKGO_SLOW} \
     --ginkgo.v \
     --ginkgo.no-color \
-    -oc-path=/usr/bin/oc \
     -kubectl-path=/usr/bin/oc \
     -utility-container-prefix=quay.io/kubevirt \
     -test.timeout=3h \
