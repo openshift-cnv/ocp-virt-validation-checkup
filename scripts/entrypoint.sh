@@ -23,39 +23,86 @@ mkdir -p ${RESULTS_DIR}
 START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${START_TIMESTAMP} > ${RESULTS_DIR}/startTimestamp
 
+ALLOWED_TEST_SUITES="compute|network|storage|ssp"
+if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
+  echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
+  echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
+  exit 1
+fi
+
+
+VALID_SKIP_REGEX='^([a-zA-Z0-9_-]+)(,([a-zA-Z0-9_-]+))*$'
+if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
+  echo "Invalid TEST_SKIPS format: \"${TEST_SKIPS}\""
+  echo "Expected: comma-separated list of test cases"
+  exit 1
+fi
+
+IFS=',' read -ra SUITES <<< "$TEST_SUITES"
+
+suite_enabled() {
+  local target="$1"
+  for suite in "${SUITES[@]}"; do
+    if [[ "$suite" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+
 # =======
 # compute
 # =======
-echo "Running KubeVirt test suite..."
-SIG="compute" "${TEST_KUBEVIRT_SCRIPT}"
-echo "KubeVirt test suite has finished."
+if suite_enabled "compute"; then
+  echo "Running KubeVirt test suite..."
+  SIG="compute" "${TEST_KUBEVIRT_SCRIPT}"
+  echo "KubeVirt test suite has finished."
+else
+  echo "KubeVirt test suite has been skipped."
+fi
 
 
 # =======
 # Network
 # =======
-echo "Running Network test suite..."
-SIG="network" "${TEST_KUBEVIRT_SCRIPT}"
+if suite_enabled "network"; then
+  echo "Running Network test suite..."
+  SIG="network" "${TEST_KUBEVIRT_SCRIPT}"
+  echo "Network test suite has finished."
+else
+  echo "Network test suite has been skipped."
+fi
 
 
 # =======
 # Storage
 # =======
-echo "Running Storage test suite..."
-SIG="storage" "${TEST_KUBEVIRT_SCRIPT}"
+if suite_enabled "storage"; then
+  echo "Running Storage test suite..."
+  SIG="storage" "${TEST_KUBEVIRT_SCRIPT}"
+  echo "Storage test suite has finished."
+else
+  echo "Storage test suite has been skipped."
+fi
 
 
 # ====
 # SSP
 # ====
-echo "Building SSP test suite..."
-${SCRIPT_DIR}/ssp/setup-ssp.sh
+if suite_enabled "ssp"; then
+  echo "Building SSP test suite..."
+  ${SCRIPT_DIR}/ssp/setup-ssp.sh
 
-echo "Running SSP test suite..."
-${SCRIPT_DIR}/ssp/test-ssp.sh
+  echo "Running SSP test suite..."
+  ${SCRIPT_DIR}/ssp/test-ssp.sh
 
-echo "SSP test suite has finished. Restoring the environment"
-${SCRIPT_DIR}/ssp/teardown-ssp.sh
+  echo "SSP test suite has finished. Restoring the environment"
+  ${SCRIPT_DIR}/ssp/teardown-ssp.sh
+else
+  echo "SSP test suite has been skipped."
+fi
+
 
 COMPLETION_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${COMPLETION_TIMESTAMP} > ${RESULTS_DIR}/completionTimestamp

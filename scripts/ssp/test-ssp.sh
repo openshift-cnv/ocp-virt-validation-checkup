@@ -7,6 +7,13 @@ readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 ARTIFACTS=${RESULTS_DIR}/ssp
 mkdir -p "${ARTIFACTS}"
 
+skip_tests+=('\[QUARANTINE\]')
+skip_tests+=("${TEST_SKIPS}")
+
+skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
+skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
+
+
 SSP_TESTS_BINARY="ssp.test"
 
 # SSP configuration
@@ -37,7 +44,8 @@ ${SSP_TESTS_BINARY} \
   --ginkgo.v \
   --ginkgo.no-color \
   ${DRY_RUN_FLAG} \
-  --ginkgo.timeout='2h' 2>&1 | tee ${ARTIFACTS}/ssp-log.txt
+  --ginkgo.timeout='2h' \
+  "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/ssp-log.txt
 
 source "${SCRIPT_DIR}/../funcs.sh"
 tests::hco::enable

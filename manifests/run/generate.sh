@@ -13,6 +13,25 @@ fi
 
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
+TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp"}
+
+ALLOWED_TEST_SUITES="compute|network|storage|ssp"
+if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
+  echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
+  echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
+  exit 1
+fi
+
+
+TEST_SKIPS=${TEST_SKIPS:-""}
+
+if [[ "${TEST_SKIPS}" =~ ,, ]] || [[ "${TEST_SKIPS}" =~ ^, ]] || [[ "${TEST_SKIPS}" =~ ,$ ]]; then
+  echo "Error: Invalid format for TEST_SKIPS environment variable: ${TEST_SKIPS}"
+  echo "It should be a comma-delimited list of alphanumeric strings, underscores, or hyphens."
+  exit 1
+fi
+
+
 # Namespace
 cat <<EOF
 ---
@@ -96,6 +115,10 @@ spec:
               value: ${TIMESTAMP}
             - name: RESULTS_DIR
               value: /results
+            - name: TEST_SUITES
+              value: ${TEST_SUITES}
+            - name: TEST_SKIPS
+              value: ${TEST_SKIPS}
           volumeMounts:
             - name: results-volume
               mountPath: /results
