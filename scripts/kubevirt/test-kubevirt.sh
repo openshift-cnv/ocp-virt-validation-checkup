@@ -4,9 +4,12 @@ set -ex
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 KUBEVIRT_TESTING_CONFIGURATION_FILE=${KUBEVIRT_TESTING_CONFIGURATION_FILE:-'kubevirt-testing-configuration.json'}
+readonly TARGET_NAMESPACE="openshift-cnv"
 
 skip_tests+=('\[QUARANTINE\]')
-skip_tests+=("${TEST_SKIPS}")
+if [ -n "${TEST_SKIPS}" ]; then
+  skip_tests+=("${TEST_SKIPS}")
+fi
 
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
