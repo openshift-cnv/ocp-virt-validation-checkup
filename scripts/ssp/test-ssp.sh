@@ -8,7 +8,9 @@ ARTIFACTS=${RESULTS_DIR}/ssp
 mkdir -p "${ARTIFACTS}"
 
 skip_tests+=('\[QUARANTINE\]')
-skip_tests+=("${TEST_SKIPS}")
+if [ -n "${TEST_SKIPS}" ]; then
+  skip_tests+=("${TEST_SKIPS}")
+fi
 
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
