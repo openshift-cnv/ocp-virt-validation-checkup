@@ -127,5 +127,5 @@ spec:
         - name: results-volume
           persistentVolumeClaim:
             claimName: ocp-virt-validation-pvc-${TIMESTAMP}
-  backoffLimit: 1
+  backoffLimit: 0
 EOF

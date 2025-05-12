@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -x
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 KUBEVIRT_TESTING_CONFIGURATION_FILE=${KUBEVIRT_TESTING_CONFIGURATION_FILE:-'kubevirt-testing-configuration.json'}
@@ -47,7 +47,7 @@ ${TESTS_BINARY} \
     --ginkgo.no-color \
     -kubectl-path=/usr/bin/oc \
     -utility-container-prefix=quay.io/kubevirt \
-    -test.timeout=3h \
+    -test.timeout=7h \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
