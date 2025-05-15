@@ -14,6 +14,7 @@ fi
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
 TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp"}
+STORAGE_CLASS=${STORAGE_CLASS:-""}
 
 ALLOWED_TEST_SUITES="compute|network|storage|ssp"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
@@ -119,6 +120,8 @@ spec:
               value: ${TEST_SUITES}
             - name: TEST_SKIPS
               value: ${TEST_SKIPS}
+            - name: STORAGE_CLASS
+              value: ${STORAGE_CLASS}
           volumeMounts:
             - name: results-volume
               mountPath: /results
