@@ -1,7 +1,8 @@
 {
-  "storageClassLocal": "managed-csi",
-  "storageClassHostPath": "managed-csi",
-  "storageClassRhel": "managed-csi",
-  "storageClassWindows": "managed-csi",
-  "manageStorageClasses": false
+  "storageClassRhel":        "ocs-storagecluster-ceph-rbd-virtualization",
+  "storageClassWindows":     "ocs-storagecluster-ceph-rbd-virtualization",
+  "storageRWXBlock":         "ocs-storagecluster-ceph-rbd-virtualization",
+  "storageRWOFileSystem":    "ocs-storagecluster-ceph-rbd-virtualization",
+  "storageRWOBlock":         "ocs-storagecluster-ceph-rbd-virtualization",
+  "storageSnapshot":         "ocs-storagecluster-ceph-rbd-virtualization"
 }

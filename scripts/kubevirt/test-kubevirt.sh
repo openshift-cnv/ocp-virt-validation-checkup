@@ -24,11 +24,9 @@ GINKGO_SLOW="--ginkgo.poll-progress-after=60s"
 if [ "${SIG}" == "network" ]
 then
   label_filter="--ginkgo.label-filter=sig-${SIG}"
-  ginkgo_focus="--ginkgo.focus=Services"
 elif [ "${SIG}" == "compute" ]
 then
   label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance)"
-  ginkgo_focus="--ginkgo.focus=rfe_id:1177"
 elif [ "${SIG}" == "storage" ]
 then
   label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance)"

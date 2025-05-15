@@ -50,6 +50,14 @@ suite_enabled() {
   return 1
 }
 
+if [ -z "${STORAGE_CLASS}" ]; then
+  STORAGE_CLASS=$(oc get sc -o json | jq -r '[.items[] | select(.metadata.annotations."storageclass.kubernetes.io/is-default-class"=="true")][0]'.metadata.name)
+fi
+
+if [ -z "${STORAGE_CLASS}" ]; then
+  sed -i "s/ocs-storagecluster-ceph-rbd-virtualization/${STORAGE_CLASS}/g" ${SCRIPT_DIR}/kubevirt/config/kubevirt-testing-configuration.json
+fi
+
 
 # =======
 # compute
