@@ -113,7 +113,7 @@ spec:
           imagePullPolicy: Always
           env:
             - name: DRY_RUN
-              value: ${DRY_RUN}
+              value: "${DRY_RUN}"
             - name: TIMESTAMP
               value: ${TIMESTAMP}
             - name: RESULTS_DIR

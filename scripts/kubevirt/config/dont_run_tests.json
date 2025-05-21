@@ -1,0 +1,338 @@
+[
+  {
+    "id": "QUARANTINE",
+    "reason": "Skip tests excluded in upstream CI"
+  },
+  {
+    "id": "Slirp Networking",
+    "reason": "Slirp tests don't work with QEMU from CNV D/S"
+  },
+  {
+    "id": "with TX offload disabled",
+    "reason": "virt-launcher container image does not have ethtool"
+  },
+  {
+    "id": "with cni flannel and ptp plugin interface",
+    "reason": "Genie don't work D/S"
+  },
+  {
+    "id": "with ovs-cni plugin",
+    "reason": "OVS CNI is not supported in CNV 2.0, tests are being migrated to use linux-bridge (https://github.com/kubevirt/kubevirt/pull/2330)"
+  },
+  {
+    "id": "test_id:1752",
+    "reason": "openshift does not allow the creation of networks in a different namespace (see https://github.com/openshift/multus-cni/blob/master/doc/configuration.md#namespace-isolation)"
+  },
+  {
+    "id": "test_id:1668",
+    "reason": "EFI without SecureBoot is not supported in CNV D/S, so skip it. (https://bugzilla.redhat.com/show_bug.cgi?id=1684772) Only, EFI with SecureBoot is supported D/S, so run that."
+  },
+  {
+    "id": "test_id:4620",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:851",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:852",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:3107",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:3057",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:847",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:2306",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:1681",
+    "reason": "Host disk not supported d/s"
+  },
+  {
+    "id": "test_id:1543",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "Multiple virtual machines connectivity using bridge binding interface",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "VMI with custom DNSPolicy should have the expected FQDN",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "VMI with custom DNSPolicy, a subdomain and no service entry, should not include the subdomain in the searchlist",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "VMIs with Bridge Networking should work with Duplicate Address Detection (DAD)",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "[Serial]VMIs with Bridge Networking shouldn't fail after the kubelet restarts",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "VMI connected to the pod network using bridge binding",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "test_id:1777",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "test_id:2964",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "Should allow outbound communication from VM under test - only if original MAC address is unchanged",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "Infosource VMI with 3 interfaces should have the expected entries in vmi status",
+    "reason": "Unsupported bridge binding"
+  },
+  {
+    "id": "test_id:3145",
+    "reason": "Operator Tests: Upgrades kubevirt"
+  },
+  {
+    "id": "test_id:3146",
+    "reason": "Operator Tests: Uninstalls kubevirt"
+  },
+  {
+    "id": "test_id:3148",
+    "reason": "Operator Tests: Uninstalls kubevirt"
+  },
+  {
+    "id": "test_id:3150",
+    "reason": "Operator Tests: Uninstalls kubevirt"
+  },
+  {
+    "id": "test_id:3151",
+    "reason": "Operator Tests: Updates virt-operator"
+  },
+  {
+    "id": "test_id:5010",
+    "reason": "Operator Tests: Uninstalls kubevirt"
+  },
+  {
+    "id": "test_id:3153",
+    "reason": "Operator Tests: One of the step is Delete CDI"
+  },
+  {
+    "id": "test_id:1547",
+    "reason": "[sig-network] flaky connectivity to VMI service"
+  },
+  {
+    "id": "test_id:1548",
+    "reason": "[sig-network] flaky connectivity to VMI service"
+  },
+  {
+    "id": "test_id:1549",
+    "reason": "[sig-network] flaky connectivity to VMI service"
+  },
+  {
+    "id": "HostDevices",
+    "reason": "Downstream infra doesn't support host devices scenario"
+  },
+  {
+    "id": "test_id:5360",
+    "reason": "downstream infra configuration doesn't allow to configure other IO modes for the disks"
+  },
+  {
+    "id": "HookSidecars",
+    "reason": "Sidecar feature-gate disabled in HCO"
+  },
+  {
+    "id": "CloudInitHookSidecars",
+    "reason": "Sidecar feture-gate disabled in HCO"
+  },
+  {
+    "id": "test_id:3111",
+    "reason": "Sidecar feture-gate disabled in HCO"
+  },
+  {
+    "id": "test_id:3112",
+    "reason": "Sidecar feture-gate disabled in HCO"
+  },
+  {
+    "id": "MediatedDevices",
+    "reason": "GPU passthrough"
+  },
+  {
+    "id": "test_id:6739",
+    "reason": "Guest agent ping is not supported on D/S, CNV-10188"
+  },
+  {
+    "id": "test_id:6741",
+    "reason": "Guest agent ping is not supported on D/S, CNV-10188"
+  },
+  {
+    "id": "with working Exec probe",
+    "reason": "Guest agent ping is not supported on D/S, CNV-10188"
+  },
+  {
+    "id": "test_id:1773",
+    "reason": "Slirp binding is not supported on D/S"
+  },
+  {
+    "id": "USB Redirection",
+    "reason": "Not supported"
+  },
+  {
+    "id": "test_id:1751",
+    "reason": "ptp CNI is not supported on D/S"
+  },
+  {
+    "id": "test_id:1752",
+    "reason": "ptp CNI is not supported on D/S"
+  },
+  {
+    "id": "test_id:1753",
+    "reason": "ptp CNI is not supported on D/S"
+  },
+  {
+    "id": "test_id:1705",
+    "reason": "ptp CNI is not supported on D/S"
+  },
+  {
+    "id": "[outside_connectivity]should be able to reach the outside world [IPv6]",
+    "reason": "current d/s clusters do not support communication to the outside world on IPV6"
+  },
+  {
+    "id": "Expose Expose UDP service on a VMI Expose NodePort UDP service [label:masquerade_binding_connectivity]Should expose a NodePort service on a VMI and connect to it over IPv6 IP family",
+    "reason": "current tier1 tests do not run on bare metal cluster due to insufficient test resources, and thus dual stack tests should not be considered for tier1 test gating."
+  },
+  {
+    "id": "Expose Expose service on a VM Expose NodePort service [label:masquerade_binding_connectivity]Should expose a NodePort service on a VMI and connect to it over IPv6 IP family",
+    "reason": "current tier1 tests do not run on bare metal cluster due to insufficient test resources, and thus dual stack tests should not be considered for tier1 test gating."
+  },
+  {
+    "id": "Creating a VirtualMachineInstance when virt-handler is responsive VMIs with Bridge Networking should work with Duplicate Address Detection",
+    "reason": "Bridge binding cannot be used on pod network in D/S"
+  },
+  {
+    "id": "Primary Pod Network Status VMI connected to the pod network using bridge binding Guest Agent exists should report PodIP/s IPv4 as its own on interface status ",
+    "reason": "Bridge binding cannot be used on pod network in D/S"
+  },
+  {
+    "id": "using the native ssh method",
+    "reason": "The virtctl native ssh client is not supported on D/S"
+  },
+  {
+    "id": "using the local ssh method with --local-ssh flag",
+    "reason": "The virtctl native ssh client is not supported on D/S"
+  },
+  {
+    "id": "using the native scp method",
+    "reason": "The virtctl native ssh client is not supported on D/S"
+  },
+  {
+    "id": "using the local scp method with --local-ssh flag",
+    "reason": "The virtctl native ssh client is not supported on D/S"
+  },
+  {
+    "id": "should correctly handle eventually consistent DataVolumes",
+    "reason": "https://github.com/kubevirt/kubevirt/pull/7005 first bullet point"
+  },
+  {
+    "id": "default should not set profile",
+    "reason": "the test assumes the platform will not default to any Seccomp configuration"
+  },
+  {
+    "id": "test_id:4298",
+    "reason": "The custom SELinux policy is not required anymore when running recent OSes like Centos 9."
+  },
+  {
+    "id": "VirtualMachineInstance with Linux bridge plugin interface should be able to ping between two vms with default network and secondary network with IPAM",
+    "reason": "Secondary network with IPAM is not supported DS"
+  },
+  {
+    "id": "VirtualMachineInstanceReplicaSet",
+    "reason": "ReplicaSets are not supported"
+  },
+  {
+    "id": "disk mutating sidecar",
+    "reason": "not supported on D/S"
+  },
+  {
+    "id": "With regular OpenShift user",
+    "reason": "OpenShift user access tests do not work downstream and should be disabled"
+  },
+  {
+	  "id": "VM Affinity Updating VMs node affinity should successfully update node selector",
+	  "reason": "`VMLiveUpdateFeatures` FG is not enabled in CNV"
+  },
+  {
+	  "id": "VM Affinity Updating VMs node affinity should successfully update node affinity",
+	  "reason": "`VMLiveUpdateFeatures` FG is not enabled in CNV"
+  },
+  {
+    "id": " passt ",
+    "reason": "Passt binding is not supported on CNV"
+  },
+  {
+    "id": "should be successfully started and accessible (privileged virtiofsd)",
+    "reason": "Root containers not supported downstream"
+  },
+  {
+    "id": "should be successfully started and virtiofs could be accessed privileged virtiofsd",
+    "reason": "Root containers not supported downstream"
+  },
+  {
+    "id": "2.25 to 1 mem ratio, 5.75 to 1 cpu ratio",
+    "reason": "Persistent node failure in this one test - tracked in https://issues.redhat.com/browse/CNV-29608"
+  },
+  {
+    "id": "VMI with external kernel boot",
+    "reason": "Kernel boot is not supported on CNV"
+  },
+  {
+    "id": "it should not skip any log line even trying to flood the serial console for QOSGuaranteed VMs",
+    "reason": "Unstable due to a libvirt/qemu bug - https://issues.redhat.com/browse/CNV-35318"
+  },
+  {
+    "id": "VirtualMachinePool",
+    "reason": "Virtual Machine Pool is not a productized feature"
+  },
+  {
+    "id": "given a vmpool",
+    "reason": "Virtual Machine Pool is not a productized feature"
+  },
+  {
+    "id": "VSOCK",
+    "reason": "Not supported"
+  },
+  {
+    "id": "VirtualMachineInstanceReplicaSet",
+    "reason": "VMReplicaSet is not supported on CNV"
+  },
+  {
+    "id": "test_id:529",
+    "reason": "VMReplicaSet is not supported on CNV"
+  },
+  {
+    "id": "it should rotate the internal log files",
+    "reason": "Unstable enough for breaking a lot of jobs, but stable enough for being automatically un-quarantined."
+  },
+  {
+    "id": "it should not skip any log line even trying to flood the serial console for QOSGuaranteed VMs",
+    "reason": "Unstable enough for breaking a lot of jobs, but stable enough for being automatically un-quarantined."
+  },
+  {
+    "id": "Hotplug delete attachment pod several times should remain active",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-44793"
+  }
+]
