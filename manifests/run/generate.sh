@@ -11,6 +11,7 @@ then
   exit 1
 fi
 
+DRY_RUN=${DRY_RUN:-"false"}
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
 TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp"}
@@ -26,9 +27,10 @@ fi
 
 TEST_SKIPS=${TEST_SKIPS:-""}
 
-if [[ "${TEST_SKIPS}" =~ ,, ]] || [[ "${TEST_SKIPS}" =~ ^, ]] || [[ "${TEST_SKIPS}" =~ ,$ ]]; then
-  echo "Error: Invalid format for TEST_SKIPS environment variable: ${TEST_SKIPS}"
-  echo "It should be a comma-delimited list of alphanumeric strings, underscores, or hyphens."
+VALID_SKIP_REGEX='^([a-zA-Z0-9_:|-]+)(\|([a-zA-Z0-9_:|-]+))*$'
+if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
+  echo "Invalid TEST_SKIPS format: \"${TEST_SKIPS}\""
+  echo "Expected: pipe-separated list of test cases"
   exit 1
 fi
 
@@ -111,7 +113,7 @@ spec:
           imagePullPolicy: Always
           env:
             - name: DRY_RUN
-              value: "false"
+              value: ${DRY_RUN}
             - name: TIMESTAMP
               value: ${TIMESTAMP}
             - name: RESULTS_DIR

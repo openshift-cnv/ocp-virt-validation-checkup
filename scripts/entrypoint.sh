@@ -31,7 +31,7 @@ if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]];
 fi
 
 
-VALID_SKIP_REGEX='^([a-zA-Z0-9_-]+)(\|([a-zA-Z0-9_-]+))*$'
+VALID_SKIP_REGEX='^([a-zA-Z0-9_:|-]+)(\|([a-zA-Z0-9_:|-]+))*$'
 if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
   echo "Invalid TEST_SKIPS format: \"${TEST_SKIPS}\""
   echo "Expected: pipe-separated list of test cases"
