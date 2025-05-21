@@ -1,0 +1,358 @@
+[
+  {
+    "id": "with a dedicated migration network Should migrate over that network",
+    "reason": "Failed continously - Tracked in https://issues.redhat.com/browse/CNV-17143"
+  },
+  {
+    "id": "should fail if flavor and VMI define CPU",
+    "reason": "Flaky \u0026 unsupported https://issues.redhat.com/browse/CNV-19773"
+  },
+  {
+    "id": "should apply flavor to CPU",
+    "reason": "flaky downstream and currently unsupported - Tracked in https://issues.redhat.com/browse/CNV-19162"
+  },
+  {
+    "id": "VM Live Migration Starting a VirtualMachineInstance [Serial] with migration policies migration policy should not affect cluster-wide policy if not defined",
+    "reason": "Postcopy fails due to seccomp default - Tracked in https://issues.redhat.com/browse/CNV-22602"
+  },
+  {
+    "id": "should remove VMs once they are marked for deletion",
+    "reason": "Slow vmi deletion - tracked in https://issues.redhat.com/browse/OCPBUGS-27949"
+  },
+  {
+    "id": "should roll out VMI template changes and proactively roll out new VMIs",
+    "reason": "Slow vmi deletion - tracked in https://issues.redhat.com/browse/OCPBUGS-27949"
+  },
+  {
+    "id": "test_id:4135",
+    "reason": "Constantly failing with invalid character 'F' looking for beginning of value - https://issues.redhat.com/browse/CNV-38682"
+  },
+  {
+    "id": "test_id:6239",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-45625"
+  },
+  {
+    "id": "test_id:3225",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:2666",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6227",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6984",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3175",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1681",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1672",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6226",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6240",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3112",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:232",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1413",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:9839",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3155",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6310",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3312",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:5843",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1518",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1414",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3088",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:9836",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6239",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6233",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:7751",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1520",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6237",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3169",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3247",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6236",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6238",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6245",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3159",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3111",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:2653",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3311",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:707",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6241",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3250",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3246",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:9834",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:11214",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:5004",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:2228",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3168",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1411",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:9899",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:7748",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:714",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6230",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:7750",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:4121",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:6242",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:4135",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1684",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3156",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3160",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1418",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:1415",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:3167",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:TODO",
+    "reason": "Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46546"
+  },
+  {
+    "id": "test_id:5360",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "rfe_id:3106",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3190",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:10818",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3134",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3109",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3131",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3137",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:10819",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:4620",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:851",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:2306",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:868",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3133",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:1681",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:3130",
+    "reason": "[sig-storage] Bulk Quarantine - tracked in https://issues.redhat.com/browse/CNV-46717"
+  },
+  {
+    "id": "test_id:6244",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-47520"
+  },
+  {
+    "id": "should delete old vm revision and create new one when restarting vm",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-47384"
+  },
+  {
+    "id": "test_id: 3097",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-47522"
+  },
+  {
+    "id": "test_id: 856",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-47523"
+  },
+  {
+    "id": "Check disk expansion accounts for actual usable size",
+    "reason": "tracked in https://issues.redhat.com/browse/CNV-50267"
+  }
+]
