@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+set -e
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
@@ -99,7 +99,7 @@ fi
 # SSP
 # ====
 if suite_enabled "ssp"; then
-  echo "Building SSP test suite..."
+  echo "Setup SSP test suite..."
   ${SCRIPT_DIR}/ssp/setup-ssp.sh
 
   echo "Running SSP test suite..."

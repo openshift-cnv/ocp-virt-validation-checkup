@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -x
+set -e
 
 function escape() {
     echo "$1" | sed -E 's/([][()| ])/\\\1/g'

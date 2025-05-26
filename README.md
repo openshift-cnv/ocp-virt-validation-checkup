@@ -7,12 +7,17 @@ This repository provides the necessary scripts and utilities to run a validation
 * Run the test suites, with optional modifications, in a streamlined way.
 * Get and browse the validation checkup results with little effort. The test suite results, logs and artifacts are being stored in a PersistentVolumeClaim. A summary of the results is being stored to a ConfigMap.
 
+
+## Pre-requisites
+* [OpenShift Container Platform (OCP)](https://www.redhat.com/en/technologies/cloud-computing/openshift) with [OpenShift Virtualization](https://www.redhat.com/en/technologies/cloud-computing/openshift/virtualization) 4.19 (or above) installed.
+* cluster-admin permissions.
+
 ## Usage
 ### Get the validation checkup image
-On an OpenShift cluster with OpenShift Virtualization 4.19 (or above) installed, get the validation-checkup image from the CSV of OpenShift Virtualization Operator:
+On an OpenShift cluster with OpenShift Virtualization installed, get the validation-checkup image from the CSV of OpenShift Virtualization Operator:
 ```bash
-$ CSV_NAME=$(oc get csv -n openshift-cnv -o json | jq -r '.items[] | select(.metadata.name | startswith("kubevirt-hyperconverged")).metadata.name'
-$ OCP_VIRT_VALIDATION_IMAGE=$(oc get csv -n openshift-cnv $CSV_NAME -o json | jq -r '.spec.relatedImages[] | select(.name | contains("ocp-virt-validation-checkup")).image)'
+$ CSV_NAME=$(oc get csv -n openshift-cnv -o json | jq -r '.items[] | select(.metadata.name | startswith("kubevirt-hyperconverged")).metadata.name')
+$ OCP_VIRT_VALIDATION_IMAGE=$(oc get csv -n openshift-cnv $CSV_NAME -o json | jq -r '.spec.relatedImages[] | select(.name | contains("ocp-virt-validation-checkup")).image')
 ```
 
 ### Run the validation checkup
