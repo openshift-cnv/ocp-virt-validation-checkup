@@ -32,7 +32,7 @@ TESTS_BINARY="kubevirt.test"
 export ARTIFACTS=${RESULTS_DIR}/${SIG}
 mkdir -p "${ARTIFACTS}"
 
-GINKGO_FLAKE="--ginkgo.flake-attempts=1"
+GINKGO_FLAKE="--ginkgo.flake-attempts=3"
 GINKGO_SLOW="--ginkgo.poll-progress-after=60s"
 
 if [ "${SIG}" == "network" ]

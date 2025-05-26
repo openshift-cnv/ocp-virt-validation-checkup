@@ -227,7 +227,7 @@ summary:
 In order to view the detailed results of the validation checkup execution once the Job finishes, an nginx server that mounts the PVC should be set up.  
 To do so, the timestamp of the last execution should first be retrieved:  
 ```bash
-$ TIMESTAMP="$(oc -n ocp-virt-validation get job --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="ocp-virt-validation-checkup")].env[?(@.name=="TIMESTAMP")].value}')"
+$ TIMESTAMP="$(oc -n ocp-virt-validation get job --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].spec.template.spec.containers[?(@.name=="ocp-virt-validation-checkup")].env[?(@.name=="TIMESTAMP")].value}')"
 ```
 Then, use that timestamp and run:  
 ```bash
