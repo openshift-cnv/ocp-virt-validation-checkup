@@ -290,3 +290,31 @@ tests::monitoring::get_prometheus_namespace() {
     --ignore-not-found
 }
 
+create_kubeconfig() {
+  SERVICE_ACCOUNT_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+  TOKEN=$(cat ${SERVICE_ACCOUNT_DIR}/token)
+  CA_CERT=${SERVICE_ACCOUNT_DIR}/ca.crt
+  NAMESPACE=$(cat ${SERVICE_ACCOUNT_DIR}/namespace)
+  APISERVER=https://kubernetes.default.svc
+
+  KUBECONFIG_FILE=kubeconfig
+
+  oc config set-cluster in-cluster \
+    --server="${APISERVER}" \
+    --certificate-authority="${CA_CERT}" \
+    --embed-certs=true \
+    --kubeconfig="${KUBECONFIG_FILE}"
+
+  oc config set-credentials sa-user \
+    --token="${TOKEN}" \
+    --kubeconfig="${KUBECONFIG_FILE}"
+
+  oc config set-context sa-context \
+    --cluster=in-cluster \
+    --user=sa-user \
+    --namespace="${NAMESPACE}" \
+    --kubeconfig="${KUBECONFIG_FILE}"
+
+  oc config use-context sa-context --kubeconfig="${KUBECONFIG_FILE}"
+}
+

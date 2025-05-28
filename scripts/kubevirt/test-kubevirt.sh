@@ -43,7 +43,7 @@ then
   label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance)"
 elif [ "${SIG}" == "storage" ]
 then
-  label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance)"
+  label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance),(StorageCritical)"
 fi
 
 echo "Starting ${SIG} tests 🧪"
@@ -58,6 +58,7 @@ ${TESTS_BINARY} \
     --ginkgo.v \
     --ginkgo.no-color \
     -kubectl-path=/usr/bin/oc \
+    -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
     -utility-container-prefix=quay.io/kubevirt \
     -test.timeout=7h \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \

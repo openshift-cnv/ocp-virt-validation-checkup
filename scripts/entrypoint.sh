@@ -3,6 +3,7 @@
 set -e
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source "${SCRIPT_DIR}/funcs.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
 DRY_RUN_FLAG=""
@@ -12,6 +13,7 @@ then
 fi
 export DRY_RUN_FLAG
 
+create_kubeconfig
 
 REGISTRY_CONFIG=$(mktemp)
 oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${REGISTRY_CONFIG}"
