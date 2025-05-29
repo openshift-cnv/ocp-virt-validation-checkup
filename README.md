@@ -11,6 +11,9 @@ This repository provides the necessary scripts and utilities to run a validation
 ## Pre-requisites
 * [OpenShift Container Platform (OCP)](https://www.redhat.com/en/technologies/cloud-computing/openshift) with [OpenShift Virtualization](https://www.redhat.com/en/technologies/cloud-computing/openshift/virtualization) 4.19 (or above) installed.
 * cluster-admin permissions.
+* For tests involving Virtual Machine live migration, a ReadWriteMany storage class should be available. e.g. [OpenShift Data Foundation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/storage/configuring-persistent-storage#red-hat-openshift-data-foundation).
+* For storage test suite, a default VolumeSnapshotClass should be set.
+* For SSP test suite, `enableCommonBootImageImport` in HyperConverged CR should be set to `false`.
 
 ## Usage
 ### Get the validation checkup image
