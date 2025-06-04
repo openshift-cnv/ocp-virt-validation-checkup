@@ -1,0 +1,34 @@
+[
+  {
+    "ginkgo_label_name": "in-place-hotplug-NICs",
+    "reason": "In-place hotplug NICs depends on Multus V4 which is not GA'ed on D/S yet"
+  },
+  {
+    "ginkgo_label_name": "SRIOV",
+    "reason": "We don't have SRIOV HW"
+  },
+  {
+    "ginkgo_label_name": "Macvtap",
+    "reason": "(TODO: verify) not supported on D/S"
+  },
+  {
+    "ginkgo_label_name": "GPU",
+    "reason": "(TODO: verify) not supported on D/S"
+  },
+  {
+    "ginkgo_label_name": "netCustomBindingPlugins",
+    "reason": "Existing network binding plugins are not supported on D/S"
+  },
+  {
+    "ginkgo_label_name": "Istio",
+    "reason": "D/S env does not deploy OSSM at the moment, remove filtering once it does"
+  },
+  {
+    "ginkgo_label_name": "native-ssh",
+    "reason": "--local-ssh is not be available in d/s builds"
+  },
+  {
+    "ginkgo_label_name": "disruptive",
+    "reason": "Disruptive tests may cause a disruption to the cluster's normal operation and cause flakes"
+  }
+]

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 function escape() {
     echo "$1" | sed -E 's/([][()| ])/\\\1/g'
@@ -25,6 +25,13 @@ for test_id in $(
     skip_tests+=("$(escape "${test_id}")")
 done
 
+label_filter=()
+
+skip_tests_labels_file="${SCRIPT_DIR}/config/dont_run_tests_labels.json"
+for ginkgo_label_name in $(jq -r '.[].ginkgo_label_name' $skip_tests_labels_file); do
+  label_filter+=( "!($ginkgo_label_name)" )
+done
+
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
 
@@ -37,14 +44,18 @@ GINKGO_SLOW="--ginkgo.poll-progress-after=60s"
 
 if [ "${SIG}" == "network" ]
 then
-  label_filter="--ginkgo.label-filter=sig-${SIG}"
+  label_filter+=( "sig-${SIG}" )
 elif [ "${SIG}" == "compute" ]
 then
-  label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance)"
+  label_filter+=( "(sig-${SIG}&&conformance)" )
 elif [ "${SIG}" == "storage" ]
 then
-  label_filter="--ginkgo.label-filter=(sig-${SIG}&&conformance),(StorageCritical)"
+  label_filter+=( "(sig-${SIG}&&conformance),(StorageCritical)" )
 fi
+
+label_filter_joined=$(printf '%s&&' "${label_filter[@]}")
+label_filter_joined=${label_filter_joined%&&}
+label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
 echo "Starting ${SIG} tests 🧪"
 ${TESTS_BINARY} \
@@ -52,7 +63,7 @@ ${TESTS_BINARY} \
     -config="${SCRIPT_DIR}/config/${KUBEVIRT_TESTING_CONFIGURATION_FILE}" \
     -installed-namespace="$TARGET_NAMESPACE" \
     -junit-output="${ARTIFACTS}/junit.results.xml" \
-    "${label_filter}" \
+    "${label_filter_str}" \
     ${ginkgo_focus} \
     ${GINKGO_SLOW} \
     --ginkgo.v \
