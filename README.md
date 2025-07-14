@@ -378,3 +378,10 @@ For each subdirectory (compute, network, storage, ssp), there are:
 * k8s-reporter folder, containing artifacts of the failed test runs.
 
 In addition, a compressed `tar.gz` file is provided at the root directory, allowing the user to download it and browse the results locally.
+
+**Note**
+Instead of using the Route for the PVC Reader nginx server, you can use the following command to access it:
+```bash
+$ oc port-forward service/pvc-reader 8080:8080 -n ocp-virt-validation
+```
+And then the results will be accessible through http://localhost:8080

@@ -15,6 +15,7 @@ DRY_RUN=${DRY_RUN:-"false"}
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
 TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp"}
+FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 
 ALLOWED_TEST_SUITES="compute|network|storage|ssp"
@@ -122,6 +123,8 @@ spec:
               value: ${TEST_SUITES}
             - name: TEST_SKIPS
               value: ${TEST_SKIPS}
+            - name: FULL_SUITE
+              value: ${FULL_SUITE}
             - name: STORAGE_CLASS
               value: ${STORAGE_CLASS}
           volumeMounts:

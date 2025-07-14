@@ -42,15 +42,17 @@ mkdir -p "${ARTIFACTS}"
 GINKGO_FLAKE="--ginkgo.flake-attempts=3"
 GINKGO_SLOW="--ginkgo.poll-progress-after=60s"
 
-if [ "${SIG}" == "network" ]
-then
-  label_filter+=( "sig-${SIG}" )
-elif [ "${SIG}" == "compute" ]
+
+if [ "${FULL_SUITE}" == "true" ]
 then
   label_filter+=( "(sig-${SIG}&&conformance)" )
-elif [ "${SIG}" == "storage" ]
+else
+  label_filter+=( "(sig-${SIG})" )
+fi
+
+if [ "${SIG}" == "storage" ]
 then
-  label_filter+=( "(sig-${SIG}&&conformance),(StorageCritical)" )
+  label_filter+=( "(StorageCritical)" )
 fi
 
 label_filter_joined=$(printf '%s&&' "${label_filter[@]}")
