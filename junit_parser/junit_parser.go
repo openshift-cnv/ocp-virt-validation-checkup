@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"junitparser/configmap"
-	"junitparser/junit"
+	"junitparser/junit_parser/junit"
 	"junitparser/k8s"
 	"junitparser/result"
 )

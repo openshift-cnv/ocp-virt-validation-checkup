@@ -316,5 +316,6 @@ create_kubeconfig() {
     --kubeconfig="${KUBECONFIG_FILE}"
 
   oc config use-context sa-context --kubeconfig="${KUBECONFIG_FILE}"
+  export KUBECONFIG=$(pwd)/${KUBECONFIG_FILE}
 }
 

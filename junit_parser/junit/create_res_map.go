@@ -32,6 +32,11 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 			continue
 		}
 
+		// Skip the lost+found directory
+		if entry.Name() == "lost+found" {
+			continue
+		}
+
 		wg.Add(1)
 
 		go func(sig string) {

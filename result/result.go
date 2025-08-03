@@ -8,7 +8,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"junitparser/junit"
+	"junitparser/junit_parser/junit"
 )
 
 // Result represents the result of a test run, including a map of test suite results and a summary.

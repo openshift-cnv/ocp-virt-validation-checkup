@@ -14,11 +14,11 @@ fi
 DRY_RUN=${DRY_RUN:-"false"}
 TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
 
-TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp"}
+TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp,tier2"}
 FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp"
+ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
   echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
@@ -113,6 +113,14 @@ spec:
           image: ${OCP_VIRT_VALIDATION_IMAGE}
           imagePullPolicy: Always
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: DRY_RUN
               value: "${DRY_RUN}"
             - name: TIMESTAMP
@@ -124,7 +132,7 @@ spec:
             - name: TEST_SKIPS
               value: ${TEST_SKIPS}
             - name: FULL_SUITE
-              value: ${FULL_SUITE}
+              value: "${FULL_SUITE}"
             - name: STORAGE_CLASS
               value: ${STORAGE_CLASS}
           volumeMounts:

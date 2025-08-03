@@ -45,9 +45,9 @@ GINKGO_SLOW="--ginkgo.poll-progress-after=60s"
 
 if [ "${FULL_SUITE}" == "true" ]
 then
-  label_filter+=( "(sig-${SIG}&&conformance)" )
-else
   label_filter+=( "(sig-${SIG})" )
+else
+  label_filter+=( "(sig-${SIG}&&conformance)" )
 fi
 
 if [ "${SIG}" == "storage" ]

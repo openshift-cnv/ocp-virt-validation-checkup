@@ -94,3 +94,45 @@ func TestNewResultMapWithInvalidJunitFiles(t *testing.T) {
 		t.Errorf("expected 0 results, got %d", len(result))
 	}
 }
+
+func TestNewResultMapSkipsLostAndFoundDirectory(t *testing.T) {
+	validJunitContent := `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite tests="1" failures="0" time="0.001" name="test.suite">
+    <testcase classname="test.class" name="test.name" time="0.001"></testcase>
+</testsuite>`
+
+	dir := generateResDir(t, map[string]string{
+		"sig1": validJunitContent,
+		"sig2": validJunitContent,
+	})
+
+	// Create a lost+found directory (without junit file)
+	lostFoundPath := path.Join(dir, "lost+found")
+	err := os.Mkdir(lostFoundPath, 0755)
+	if err != nil {
+		t.Fatalf("failed to create lost+found directory: %v", err)
+	}
+
+	result, err := NewResultMap(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only have 2 results (sig1 and sig2), lost+found should be skipped
+	if len(result) != 2 {
+		t.Errorf("expected 2 results, got %d", len(result))
+	}
+
+	// Verify that lost+found is not in the results
+	if _, exists := result["lost+found"]; exists {
+		t.Error("lost+found directory should have been skipped but was found in results")
+	}
+
+	// Verify that the valid directories are present
+	if _, exists := result["sig1"]; !exists {
+		t.Error("sig1 should be present in results but was not found")
+	}
+	if _, exists := result["sig2"]; !exists {
+		t.Error("sig2 should be present in results but was not found")
+	}
+}
