@@ -160,7 +160,7 @@ echo ${COMPLETION_TIMESTAMP} > ${RESULTS_DIR}/completionTimestamp
 # =========
 # Summarize
 # =========
-junitparser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt
+junit_parser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt
 
 # Archive test results into tar.gz
 tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} .
