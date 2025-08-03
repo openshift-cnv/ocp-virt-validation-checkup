@@ -2,7 +2,7 @@ package result_test
 
 import (
 	"encoding/json"
-	"junitparser/junit"
+	"junitparser/junit_parser/junit"
 	"junitparser/result"
 	"testing"
 )

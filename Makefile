@@ -1,7 +1,7 @@
 .PHONY: build
 build: test
-	go build -o bin/ .
+	go build -o bin/ ./...
 
 .PHONY: test
 test:
-	go test ./...
+	go test -count=1 ./...

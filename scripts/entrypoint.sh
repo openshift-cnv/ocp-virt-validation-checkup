@@ -34,7 +34,26 @@ mkdir -p ${RESULTS_DIR}
 START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${START_TIMESTAMP} > ${RESULTS_DIR}/startTimestamp
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp"
+# Start progress watcher in background
+echo "Starting progress watcher for multi-suite monitoring..."
+progress_watcher --results-dir="${RESULTS_DIR}" &
+PROGRESS_WATCHER_PID=$!
+echo "Progress watcher started with PID: ${PROGRESS_WATCHER_PID}"
+
+# Function to cleanup progress watcher
+cleanup_progress_watcher() {
+    if [[ -n "${PROGRESS_WATCHER_PID}" ]] && kill -0 "${PROGRESS_WATCHER_PID}" 2>/dev/null; then
+        echo "Stopping progress watcher (PID: ${PROGRESS_WATCHER_PID})..."
+        kill "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
+        wait "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
+        echo "Progress watcher stopped."
+    fi
+}
+
+# Set trap to cleanup progress watcher on script exit
+trap cleanup_progress_watcher EXIT INT TERM
+
+ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
   echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
@@ -120,6 +139,18 @@ if suite_enabled "ssp"; then
   ${SCRIPT_DIR}/ssp/teardown-ssp.sh
 else
   echo "SSP test suite has been skipped."
+fi
+
+
+# =======
+# Tier-2
+# =======
+if suite_enabled "tier2"; then
+  echo "Running Tier-2 (openshift-virtualization-tests) test suite..."
+  ${SCRIPT_DIR}/tier2/test-tier2.sh
+  echo "Tier-2 test suite has finished."
+else
+  echo "Tier-2 test suite has been skipped."
 fi
 
 
