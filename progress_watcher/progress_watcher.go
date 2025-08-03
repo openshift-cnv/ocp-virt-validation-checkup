@@ -46,6 +46,7 @@ type TestSuite struct {
 	LogFile   string
 	Total     int
 	Completed int
+	Finished  bool
 	Reader    *bufio.Reader
 	File      *os.File
 }
@@ -64,6 +65,7 @@ type SuiteState struct {
 	Total     int
 	Completed int
 	Percent   int
+	Finished  bool
 }
 
 // DuplicateFilterWriter wraps an io.Writer and filters out consecutive duplicate lines
@@ -277,6 +279,27 @@ func discoverTestSuites(resultsDir string) []*TestSuite {
 	return suites
 }
 
+// getTotalExpectedSuites returns the total number of test suites that could be executed
+func getTotalExpectedSuites() int {
+	// Read from TEST_SUITES environment variable (comma-separated list)
+	testSuites := os.Getenv("TEST_SUITES")
+	if testSuites == "" {
+		// Default to all 5 suites if not specified
+		return 5
+	}
+
+	// Split by comma and count
+	suites := strings.Split(testSuites, ",")
+	count := 0
+	for _, suite := range suites {
+		if strings.TrimSpace(suite) != "" {
+			count++
+		}
+	}
+
+	return count
+}
+
 // processSuiteLine processes a single line from a test suite log
 func processSuiteLine(suite *TestSuite, line string) {
 	// Check for total specs detection (Ginkgo)
@@ -294,15 +317,58 @@ func processSuiteLine(suite *TestSuite, line string) {
 		}
 	}
 
+	// Check for suite completion indicators
+	if !suite.Finished {
+		// Common completion patterns that indicate the suite has finished
+		finishPatterns := []string{
+			"Ran ",                // Ginkgo final summary
+			"===",                 // Pytest session summary
+			"PASS:",               // Final pass/fail status
+			"FAIL:",               // Final pass/fail status
+			"tests completed",     // Generic completion
+			"test session starts", // End of pytest session
+		}
+
+		for _, pattern := range finishPatterns {
+			if strings.Contains(line, pattern) && (strings.Contains(line, "second") ||
+				strings.Contains(line, "passed") || strings.Contains(line, "failed") ||
+				strings.Contains(line, "complete")) {
+				suite.Finished = true
+				logger.Printf("[%s] Suite finished\n", suite.Name)
+				break
+			}
+		}
+
+		// Also check if we've reached total completion
+		if suite.Total > 0 && suite.Completed >= suite.Total {
+			suite.Finished = true
+			logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+		}
+	}
+
 	// Check for completed tests
-	if strings.HasPrefix(line, "•") { // Ginkgo test completion
-		suite.Completed++
-		logger.Printf("[%s] Completed: %d/%d\n", suite.Name, suite.Completed, suite.Total)
-	} else if strings.Contains(line, "PASSED") || strings.Contains(line, "FAILED") {
-		// Pytest test completion patterns
-		if strings.Contains(line, "::test_") || strings.Contains(line, " test_") {
+	if !suite.Finished { // Only count new completions if not finished
+		if strings.HasPrefix(line, "•") { // Ginkgo test completion
 			suite.Completed++
 			logger.Printf("[%s] Completed: %d/%d\n", suite.Name, suite.Completed, suite.Total)
+
+			// Check if we've now reached completion
+			if suite.Total > 0 && suite.Completed >= suite.Total {
+				suite.Finished = true
+				logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+			}
+		} else if strings.Contains(line, "PASSED") || strings.Contains(line, "FAILED") {
+			// Pytest test completion patterns
+			if strings.Contains(line, "::test_") || strings.Contains(line, " test_") {
+				suite.Completed++
+				logger.Printf("[%s] Completed: %d/%d\n", suite.Name, suite.Completed, suite.Total)
+
+				// Check if we've now reached completion
+				if suite.Total > 0 && suite.Completed >= suite.Total {
+					suite.Finished = true
+					logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+				}
+			}
 		}
 	}
 }
@@ -372,7 +438,8 @@ func hasProgressChanged(currentState *ProgressState) bool {
 		if !exists ||
 			previousSuite.Total != currentSuite.Total ||
 			previousSuite.Completed != currentSuite.Completed ||
-			previousSuite.Percent != currentSuite.Percent {
+			previousSuite.Percent != currentSuite.Percent ||
+			previousSuite.Finished != currentSuite.Finished {
 			return true
 		}
 	}
@@ -396,29 +463,41 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		return fmt.Errorf("failed to get owning job: %v", err)
 	}
 
-	// Calculate overall totals
+	// Calculate progress using equal contribution per suite
 	var overallTotal, overallCompleted int
+	var suitePercentageSum int
+	totalExpectedSuites := getTotalExpectedSuites()
 	annotations := make(map[string]string)
 
 	for _, suite := range suites {
 		overallTotal += suite.Total
 		overallCompleted += suite.Completed
 
+		// Calculate suite percentage
+		var suitePercent int
+		if suite.Finished {
+			// Finished suites always count as 100%
+			suitePercent = 100
+		} else if suite.Total > 0 {
+			suitePercent = suite.Completed * 100 / suite.Total
+		} else {
+			suitePercent = 0
+		}
+
+		suitePercentageSum += suitePercent
+
 		// Store per-suite data as annotations
 		annotations[fmt.Sprintf("test-progress/%s-total", suite.Name)] = fmt.Sprintf("%d", suite.Total)
 		annotations[fmt.Sprintf("test-progress/%s-completed", suite.Name)] = fmt.Sprintf("%d", suite.Completed)
-		if suite.Total > 0 {
-			percent := suite.Completed * 100 / suite.Total
-			annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = fmt.Sprintf("%d", percent)
-		} else {
-			annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = "0"
-		}
+		annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = fmt.Sprintf("%d", suitePercent)
+		annotations[fmt.Sprintf("test-progress/%s-finished", suite.Name)] = fmt.Sprintf("%t", suite.Finished)
 	}
 
-	// Calculate overall percentage
+	// Calculate overall percentage: (sum of suite percentages) / (total expected suites)
+	// Each suite contributes equally to the overall progress
 	var overallPercent int
-	if overallTotal > 0 {
-		overallPercent = overallCompleted * 100 / overallTotal
+	if totalExpectedSuites > 0 {
+		overallPercent = suitePercentageSum / totalExpectedSuites
 	}
 
 	// Build current progress state for change detection
@@ -433,13 +512,17 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 	// Populate per-suite progress state
 	for _, suite := range suites {
 		var percent int
-		if suite.Total > 0 {
+		if suite.Finished {
+			// Finished suites always count as 100%
+			percent = 100
+		} else if suite.Total > 0 {
 			percent = suite.Completed * 100 / suite.Total
 		}
 		currentState.SuiteProgress[suite.Name] = SuiteState{
 			Total:     suite.Total,
 			Completed: suite.Completed,
 			Percent:   percent,
+			Finished:  suite.Finished,
 		}
 	}
 

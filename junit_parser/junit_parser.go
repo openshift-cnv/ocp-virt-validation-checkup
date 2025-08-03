@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"junitparser/config"
 	"os"
 	"time"
 
+	"junitparser/config"
 	"junitparser/configmap"
 	"junitparser/junit_parser/junit"
 	"junitparser/k8s"
