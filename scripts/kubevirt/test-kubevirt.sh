@@ -59,10 +59,29 @@ label_filter_joined=$(printf '%s&&' "${label_filter[@]}")
 label_filter_joined=${label_filter_joined%&&}
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
+# Determine the storage configuration file path
+STORAGE_CONFIG_PATH=""
+if [ -n "${KUBEVIRT_STORAGE_CONFIGURATION_FILE}" ]; then
+  # Check if custom config exists in results directory first
+  if [ -f "${RESULTS_DIR}/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}" ]; then
+    STORAGE_CONFIG_PATH="${RESULTS_DIR}/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+    echo "Using custom storage configuration from results directory: ${STORAGE_CONFIG_PATH}"
+  elif [ -f "${SCRIPT_DIR}/config/storage/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}" ]; then
+    STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/storage/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+    echo "Using predefined storage configuration: ${STORAGE_CONFIG_PATH}"
+  else
+    echo "Warning: Storage configuration file not found: ${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+    STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/storage/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+  fi
+else
+  # Use default configuration path if no storage config specified
+  STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/${KUBEVIRT_TESTING_CONFIGURATION_FILE}"
+fi
+
 echo "Starting ${SIG} tests 🧪"
 ${TESTS_BINARY} \
     -cdi-namespace="$TARGET_NAMESPACE" \
-    -config="${SCRIPT_DIR}/config/${KUBEVIRT_TESTING_CONFIGURATION_FILE}" \
+    -config="${STORAGE_CONFIG_PATH}" \
     -installed-namespace="$TARGET_NAMESPACE" \
     -junit-output="${ARTIFACTS}/junit.results.xml" \
     "${label_filter_str}" \

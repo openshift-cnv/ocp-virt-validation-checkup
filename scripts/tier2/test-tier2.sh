@@ -20,12 +20,19 @@ if [ -z "${STORAGE_CLASS}" ]; then
   STORAGE_CLASS=${DEFAULT_STORAGE_CLASS}
 fi
 
+if [ "${DRY_RUN}" == "true" ]
+then
+  DRY_RUN_FLAG="--collect-only"
+else
+  DRY_RUN_FLAG=""
+fi
 
 ./uv run pytest \
-  -m "conformance and single_nic" \
+  -m "conformance" \
   --skip-artifactory-check \
   --tc=hco_subscription:${SUBSCRIPTION_NAME} \
   --storage-class-matrix=${STORAGE_CLASS} \
   --default-storage-class=${DEFAULT_STORAGE_CLASS} \
   -s -o log_cli=true \
+  ${DRY_RUN_FLAG} \
   --junitxml="${ARTIFACTS}/junit.results.xml" | tee ${ARTIFACTS}/tier2-log.txt

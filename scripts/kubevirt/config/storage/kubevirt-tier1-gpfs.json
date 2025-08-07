@@ -1,0 +1,7 @@
+{
+    "storageClassRhel":        "ibm-spectrum-scale-sample",
+    "storageClassWindows":     "ibm-spectrum-scale-sample",
+    "storageRWXFileSystem":    "ibm-spectrum-scale-sample",
+    "storageRWOFileSystem":    "ibm-spectrum-scale-sample",
+    "storageSnapshot":         "ibm-spectrum-scale-sample"
+}

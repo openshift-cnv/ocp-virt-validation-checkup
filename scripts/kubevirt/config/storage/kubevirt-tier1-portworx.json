@@ -1,0 +1,8 @@
+{
+    "storageClassRhel":        "px-csi-db-shared",
+    "storageClassWindows":     "px-csi-db-shared",
+    "storageRWXFileSystem":    "px-csi-db-shared",
+    "storageRWOFileSystem":    "px-csi-db-shared",
+    "storageRWOBlock":         "px-csi-db-shared",
+    "storageSnapshot":         "px-csi-db-shared"
+}

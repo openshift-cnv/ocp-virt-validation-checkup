@@ -1,0 +1,6 @@
+{
+    "storageClassRhel":        "nfs",
+    "storageClassWindows":     "nfs",
+    "storageRWXFileSystem":    "nfs",
+    "storageRWOFileSystem":    "nfs"
+}

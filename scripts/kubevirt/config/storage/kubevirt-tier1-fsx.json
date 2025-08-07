@@ -1,0 +1,7 @@
+{
+    "storageClassRhel":        "trident-csi-fsx",
+    "storageClassWindows":     "trident-csi-fsx",
+    "storageRWXFileSystem":    "trident-csi-fsx",
+    "storageRWOFileSystem":    "trident-csi-fsx",
+    "storageSnapshot":         "trident-csi-fsx"
+}

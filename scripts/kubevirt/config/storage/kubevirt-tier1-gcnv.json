@@ -1,0 +1,7 @@
+{
+    "storageClassRhel":        "gcnv-flex",
+    "storageClassWindows":     "gcnv-flex",
+    "storageRWXFileSystem":    "gcnv-flex",
+    "storageRWOFileSystem":    "gcnv-flex",
+    "storageSnapshot":         "gcnv-flex"
+}

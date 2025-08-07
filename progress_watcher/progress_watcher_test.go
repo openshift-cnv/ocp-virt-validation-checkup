@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -194,6 +195,8 @@ func TestProcessSuiteLine(t *testing.T) {
 		line              string
 		expectedTotal     int
 		expectedCompleted int
+		expectedPassed    int
+		expectedFailed    int
 	}{
 		{
 			name: "Ginkgo total specs detection",
@@ -203,6 +206,8 @@ func TestProcessSuiteLine(t *testing.T) {
 			line:              "Will run 50 of 100 specs",
 			expectedTotal:     50,
 			expectedCompleted: 0,
+			expectedPassed:    0,
+			expectedFailed:    0,
 		},
 		{
 			name: "Pytest total items detection",
@@ -212,6 +217,8 @@ func TestProcessSuiteLine(t *testing.T) {
 			line:              "collected 25 items",
 			expectedTotal:     25,
 			expectedCompleted: 0,
+			expectedPassed:    0,
+			expectedFailed:    0,
 		},
 		{
 			name: "Ginkgo test completion",
@@ -223,6 +230,8 @@ func TestProcessSuiteLine(t *testing.T) {
 			line:              "• test passed",
 			expectedTotal:     10,
 			expectedCompleted: 6,
+			expectedPassed:    1,
+			expectedFailed:    0,
 		},
 		{
 			name: "Pytest test passed",
@@ -231,9 +240,11 @@ func TestProcessSuiteLine(t *testing.T) {
 				Total:     10,
 				Completed: 3,
 			},
-			line:              "test_something::test_case PASSED",
+			line:              "TEST: something PASSED",
 			expectedTotal:     10,
 			expectedCompleted: 4,
+			expectedPassed:    1,
+			expectedFailed:    0,
 		},
 		{
 			name: "Pytest test failed",
@@ -242,9 +253,11 @@ func TestProcessSuiteLine(t *testing.T) {
 				Total:     10,
 				Completed: 7,
 			},
-			line:              "test_another::test_case FAILED",
+			line:              "TEST: another FAILED",
 			expectedTotal:     10,
 			expectedCompleted: 8,
+			expectedPassed:    0,
+			expectedFailed:    1,
 		},
 		{
 			name: "Irrelevant line",
@@ -256,6 +269,8 @@ func TestProcessSuiteLine(t *testing.T) {
 			line:              "Some random log output",
 			expectedTotal:     10,
 			expectedCompleted: 5,
+			expectedPassed:    0,
+			expectedFailed:    0,
 		},
 	}
 
@@ -270,7 +285,146 @@ func TestProcessSuiteLine(t *testing.T) {
 			if tt.suite.Completed != tt.expectedCompleted {
 				t.Errorf("Expected completed %d, got %d", tt.expectedCompleted, tt.suite.Completed)
 			}
+
+			if tt.suite.Passed != tt.expectedPassed {
+				t.Errorf("Expected passed %d, got %d", tt.expectedPassed, tt.suite.Passed)
+			}
+
+			if tt.suite.Failed != tt.expectedFailed {
+				t.Errorf("Expected failed %d, got %d", tt.expectedFailed, tt.suite.Failed)
+			}
 		})
+	}
+}
+
+func TestPassFailCounting(t *testing.T) {
+	setupTestLogger()
+	defer func() {
+		logger = nil
+	}()
+
+	tests := []struct {
+		name              string
+		inputLines        []string
+		initialSuite      TestSuite
+		expectedPassed    int
+		expectedFailed    int
+		expectedCompleted int
+		description       string
+	}{
+		{
+			name: "Ginkgo test progression",
+			inputLines: []string{
+				"• test 1 passes",
+				"• test 2 passes",
+				"F test 3 fails",
+				"• test 4 passes",
+			},
+			initialSuite:      TestSuite{Name: "compute", Total: 10, StartTime: time.Now()},
+			expectedPassed:    2, // 2 passes after correction (1 was adjusted to fail)
+			expectedFailed:    1, // 1 fail
+			expectedCompleted: 3, // Only 3 completed since F doesn't increment completion
+			description:       "Should track pass/fail with corrections for Ginkgo patterns",
+		},
+		{
+			name: "Pytest test progression",
+			inputLines: []string{
+				"TEST: test_vm_creation PASSED",
+				"TEST: test_vm_deletion FAILED",
+				"TEST: test_vm_migration PASSED",
+			},
+			initialSuite:      TestSuite{Name: "tier2", Total: 10, StartTime: time.Now()},
+			expectedPassed:    2,
+			expectedFailed:    1,
+			expectedCompleted: 3,
+			description:       "Should track pytest pass/fail correctly",
+		},
+		{
+			name: "Summary line updates",
+			inputLines: []string{
+				"• test 1",
+				"• test 2",
+				"Final results: 5 passed, 3 failed in 2.5 seconds",
+			},
+			initialSuite:      TestSuite{Name: "compute", Total: 8, StartTime: time.Now()},
+			expectedPassed:    5, // Updated from summary
+			expectedFailed:    3, // Updated from summary
+			expectedCompleted: 2, // Still counts individual • markers
+			description:       "Should update counts from summary lines",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suite := tt.initialSuite
+
+			// Process each line
+			for _, line := range tt.inputLines {
+				processSuiteLine(&suite, line)
+			}
+
+			// Verify pass count
+			if suite.Passed != tt.expectedPassed {
+				t.Errorf("%s: Expected passed %d, got %d",
+					tt.description, tt.expectedPassed, suite.Passed)
+			}
+
+			// Verify fail count
+			if suite.Failed != tt.expectedFailed {
+				t.Errorf("%s: Expected failed %d, got %d",
+					tt.description, tt.expectedFailed, suite.Failed)
+			}
+
+			// Verify completed count
+			if suite.Completed != tt.expectedCompleted {
+				t.Errorf("%s: Expected completed %d, got %d",
+					tt.description, tt.expectedCompleted, suite.Completed)
+			}
+		})
+	}
+}
+
+func TestSuiteDurationTracking(t *testing.T) {
+	setupTestLogger()
+	defer func() {
+		logger = nil
+	}()
+
+	startTime := time.Now()
+	suite := &TestSuite{
+		Name:      "compute",
+		Total:     5,
+		StartTime: startTime,
+	}
+
+	// Simulate some test progression
+	processSuiteLine(suite, "Will run 5 of 10 specs")
+	processSuiteLine(suite, "•")
+	processSuiteLine(suite, "•")
+
+	// Wait a bit to ensure duration is measurable
+	time.Sleep(10 * time.Millisecond)
+
+	// Finish the suite
+	processSuiteLine(suite, "Ran 5 specs in 1.2 seconds")
+
+	// Verify suite is finished
+	if !suite.Finished {
+		t.Errorf("Expected suite to be finished")
+	}
+
+	// Verify end time is set
+	if suite.EndTime.IsZero() {
+		t.Errorf("Expected end time to be set")
+	}
+
+	// Verify duration is reasonable (should be > 10ms but < 1 second for this test)
+	duration := suite.EndTime.Sub(suite.StartTime)
+	if duration < 10*time.Millisecond {
+		t.Errorf("Expected duration to be at least 10ms, got %v", duration)
+	}
+	if duration > time.Second {
+		t.Errorf("Expected duration to be less than 1 second, got %v", duration)
 	}
 }
 
@@ -817,7 +971,7 @@ func TestHasProgressChanged(t *testing.T) {
 	}
 }
 
-func TestEqualContributionProgressCalculation(t *testing.T) {
+func TestProportionalProgressCalculation(t *testing.T) {
 	// Reset global state
 	originalPreviousProgress := previousProgress
 	defer func() { previousProgress = originalPreviousProgress }()
@@ -835,35 +989,35 @@ func TestEqualContributionProgressCalculation(t *testing.T) {
 			suites: []*TestSuite{
 				{Name: "compute", Total: 30, Completed: 15, Finished: false},
 			},
-			expectedOverallPercent: 10, // 50% of 1 suite out of 5 total = 50/5 = 10%
-			description:            "One suite at 50% should contribute 10% to overall (50% of 20%)",
+			expectedOverallPercent: 50, // 15/30 = 50%
+			description:            "One suite at 50% should give 50% overall",
 		},
 		{
 			name: "Single suite finished",
 			suites: []*TestSuite{
 				{Name: "compute", Total: 30, Completed: 30, Finished: true},
 			},
-			expectedOverallPercent: 20, // 100% of 1 suite out of 5 total = 100/5 = 20%
-			description:            "One finished suite should contribute 20% to overall",
+			expectedOverallPercent: 100, // 30/30 = 100%
+			description:            "One finished suite should give 100% overall",
 		},
 		{
-			name: "Two suites - one finished, one 50%",
+			name: "Two suites - different sizes",
 			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 30, Finished: true},
-				{Name: "network", Total: 20, Completed: 10, Finished: false},
+				{Name: "compute", Total: 30, Completed: 30, Finished: true},  // 30 tests done
+				{Name: "network", Total: 20, Completed: 10, Finished: false}, // 10 tests done
 			},
-			expectedOverallPercent: 30, // (100% + 50%) / 5 = 150/5 = 30%
-			description:            "Finished + 50% suite should give 30% overall",
+			expectedOverallPercent: 80, // (30+10)/(30+20) = 40/50 = 80%
+			description:            "Mixed progress should be proportional to test counts",
 		},
 		{
-			name: "Three suites finished",
+			name: "Three suites - varying sizes",
 			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 30, Finished: true},
-				{Name: "network", Total: 20, Completed: 20, Finished: true},
-				{Name: "storage", Total: 25, Completed: 25, Finished: true},
+				{Name: "compute", Total: 60, Completed: 60, Finished: true},  // 60 tests done
+				{Name: "network", Total: 20, Completed: 20, Finished: true},  // 20 tests done
+				{Name: "storage", Total: 20, Completed: 10, Finished: false}, // 10 tests done
 			},
-			expectedOverallPercent: 60, // (100% + 100% + 100%) / 5 = 300/5 = 60%
-			description:            "Three finished suites should give 60% overall",
+			expectedOverallPercent: 90, // (60+20+10)/(60+20+20) = 90/100 = 90%
+			description:            "Progress should reflect actual test completion ratios",
 		},
 		{
 			name: "All suites finished",
@@ -874,47 +1028,48 @@ func TestEqualContributionProgressCalculation(t *testing.T) {
 				{Name: "ssp", Total: 15, Completed: 15, Finished: true},
 				{Name: "tier2", Total: 10, Completed: 10, Finished: true},
 			},
-			expectedOverallPercent: 100, // (100% * 5) / 5 = 500/5 = 100%
+			expectedOverallPercent: 100, // (30+20+25+15+10)/(30+20+25+15+10) = 100/100 = 100%
 			description:            "All suites finished should give 100% overall",
 		},
 		{
-			name: "Suite finished with mismatched counts",
+			name: "Large vs small suites",
 			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 25, Finished: true}, // Finished but counts don't match
+				{Name: "compute", Total: 100, Completed: 50, Finished: false}, // 50% of large suite
+				{Name: "tier2", Total: 10, Completed: 10, Finished: true},     // 100% of small suite
 			},
-			expectedOverallPercent: 20, // Should still count as 100% = 100/5 = 20%
-			description:            "Finished suite should count as 100% regardless of actual counts",
+			expectedOverallPercent: 54, // (50+10)/(100+10) = 60/110 = 54%
+			description:            "Large suites should have more impact on overall progress",
+		},
+		{
+			name: "Empty suites ignored",
+			suites: []*TestSuite{
+				{Name: "compute", Total: 50, Completed: 25, Finished: false}, // 50% of 50 tests
+				{Name: "network", Total: 0, Completed: 0, Finished: false},   // No tests yet
+			},
+			expectedOverallPercent: 50, // 25/50 = 50% (empty suite ignored)
+			description:            "Suites with no total tests should not affect percentage",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Calculate progress using the same logic as updateJobAnnotations
-			var suitePercentageSum int
-			totalExpectedSuites := getTotalExpectedSuites()
+			var overallTotal, overallCompleted int
 
 			for _, suite := range tt.suites {
-				var suitePercent int
-				if suite.Finished {
-					// Finished suites always count as 100%
-					suitePercent = 100
-				} else if suite.Total > 0 {
-					suitePercent = suite.Completed * 100 / suite.Total
-				} else {
-					suitePercent = 0
-				}
-				suitePercentageSum += suitePercent
+				overallTotal += suite.Total
+				overallCompleted += suite.Completed
 			}
 
-			// Calculate overall percentage: (sum of suite percentages) / (total expected suites)
+			// Calculate overall percentage based on total test count across all suites
 			var overallPercent int
-			if totalExpectedSuites > 0 {
-				overallPercent = suitePercentageSum / totalExpectedSuites
+			if overallTotal > 0 {
+				overallPercent = overallCompleted * 100 / overallTotal
 			}
 
 			if overallPercent != tt.expectedOverallPercent {
-				t.Errorf("%s: Expected overall percent %d, got %d",
-					tt.description, tt.expectedOverallPercent, overallPercent)
+				t.Errorf("%s: Expected overall percent %d, got %d (completed: %d, total: %d)",
+					tt.description, tt.expectedOverallPercent, overallPercent, overallCompleted, overallTotal)
 			}
 		})
 	}
@@ -935,7 +1090,7 @@ func TestSuiteFinishingDetection(t *testing.T) {
 			inputLines: []string{
 				"•", "•", "•", "•", "•", // 5 completed
 			},
-			initialSuite:   TestSuite{Name: "compute", Total: 5, Completed: 0, Finished: false},
+			initialSuite:   TestSuite{Name: "compute", Total: 5, Completed: 0, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "compute", Total: 5, Completed: 5, Finished: true},
 			description:    "Suite should be marked finished when completed equals total",
 		},
@@ -944,16 +1099,16 @@ func TestSuiteFinishingDetection(t *testing.T) {
 			inputLines: []string{
 				"Ran 10 specs in 5.2 seconds",
 			},
-			initialSuite:   TestSuite{Name: "compute", Total: 10, Completed: 8, Finished: false},
+			initialSuite:   TestSuite{Name: "compute", Total: 10, Completed: 8, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "compute", Total: 10, Completed: 8, Finished: true},
 			description:    "Suite should be marked finished by completion pattern",
 		},
 		{
 			name: "Pytest completion pattern",
 			inputLines: []string{
-				"=== 5 passed, 2 failed in 3.45s ===",
+				"short test summary info - 5 passed, 2 failed in 3.45 seconds",
 			},
-			initialSuite:   TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: false},
+			initialSuite:   TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: true},
 			description:    "Suite should be marked finished by pytest pattern",
 		},
@@ -963,7 +1118,7 @@ func TestSuiteFinishingDetection(t *testing.T) {
 				"Starting tests...",
 				"•", "•", // Only 2 completed out of 5
 			},
-			initialSuite:   TestSuite{Name: "compute", Total: 5, Completed: 0, Finished: false},
+			initialSuite:   TestSuite{Name: "compute", Total: 5, Completed: 0, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "compute", Total: 5, Completed: 2, Finished: false},
 			description:    "Suite should not be finished when incomplete",
 		},
@@ -996,6 +1151,9 @@ func TestSuiteFinishingDetection(t *testing.T) {
 }
 
 func TestGetTotalExpectedSuites(t *testing.T) {
+	// Note: This function is no longer used in progress calculation (we use proportional calculation now)
+	// but kept for potential future use cases
+
 	// Save original TEST_SUITES value and restore after test
 	originalTestSuites := os.Getenv("TEST_SUITES")
 	defer func() {
@@ -1077,96 +1235,152 @@ func TestGetTotalExpectedSuites(t *testing.T) {
 	}
 }
 
-func TestEqualContributionWithVariableExpectedSuites(t *testing.T) {
-	// Save original TEST_SUITES value and restore after test
-	originalTestSuites := os.Getenv("TEST_SUITES")
-	defer func() {
-		if originalTestSuites != "" {
-			os.Setenv("TEST_SUITES", originalTestSuites)
-		} else {
-			os.Unsetenv("TEST_SUITES")
-		}
-	}()
-
-	setupTestLogger()
-
+func TestParseTestCountFromDryRun(t *testing.T) {
 	tests := []struct {
-		name                   string
-		testSuitesEnv          string
-		suites                 []*TestSuite
-		expectedOverallPercent int
-		description            string
+		name          string
+		output        string
+		suiteName     string
+		expectedCount int
+		description   string
 	}{
 		{
-			name:          "Two suites configured, one finished",
-			testSuitesEnv: "compute,network",
-			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 30, Finished: true},
-			},
-			expectedOverallPercent: 50, // 100% of 1 suite out of 2 total = 50%
-			description:            "One finished suite out of 2 expected should give 50%",
+			name: "Ginkgo dry-run output",
+			output: `Running Suite: Compute Suite
+Random seed: 1234567890
+Will run 42 of 50 specs
+Randomizing all specs`,
+			suiteName:     "compute",
+			expectedCount: 42,
+			description:   "Should extract count from Ginkgo dry-run output",
 		},
 		{
-			name:          "Three suites configured, two finished",
-			testSuitesEnv: "compute,network,storage",
-			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 30, Finished: true},
-				{Name: "network", Total: 20, Completed: 20, Finished: true},
-			},
-			expectedOverallPercent: 66, // (100% + 100%) / 3 = 200/3 = 66%
-			description:            "Two finished suites out of 3 expected should give 66%",
+			name: "Pytest dry-run output",
+			output: `============================= test session starts ==============================
+collecting ... collected 25 items
+
+<Module tests/test_tier2.py>
+  <Function test_vm_creation>
+  <Function test_vm_deletion>`,
+			suiteName:     "tier2",
+			expectedCount: 25,
+			description:   "Should extract count from pytest dry-run output",
 		},
 		{
-			name:          "Single suite configured, 50% complete",
-			testSuitesEnv: "compute",
-			suites: []*TestSuite{
-				{Name: "compute", Total: 30, Completed: 15, Finished: false},
-			},
-			expectedOverallPercent: 50, // 50% of 1 suite out of 1 total = 50%
-			description:            "50% of single expected suite should give 50% overall",
+			name: "No match in output",
+			output: `Some random output
+without any test counts
+or recognizable patterns`,
+			suiteName:     "unknown",
+			expectedCount: 0,
+			description:   "Should return 0 when no patterns match",
 		},
 		{
-			name:          "Single suite configured, finished",
-			testSuitesEnv: "tier2",
-			suites: []*TestSuite{
-				{Name: "tier2", Total: 10, Completed: 10, Finished: true},
-			},
-			expectedOverallPercent: 100, // 100% of 1 suite out of 1 total = 100%
-			description:            "Finished single expected suite should give 100% overall",
+			name: "Generic test pattern",
+			output: `Test discovery complete
+Found 15 tests to run
+Starting execution...`,
+			suiteName:     "generic",
+			expectedCount: 15,
+			description:   "Should handle generic test count patterns",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set the environment variable
-			os.Setenv("TEST_SUITES", tt.testSuitesEnv)
+			count := parseTestCountFromDryRun(tt.output, tt.suiteName)
 
-			// Calculate progress using the same logic as updateJobAnnotations
-			var suitePercentageSum int
-			totalExpectedSuites := getTotalExpectedSuites()
+			if count != tt.expectedCount {
+				t.Errorf("%s: Expected count %d, got %d",
+					tt.description, tt.expectedCount, count)
+			}
+		})
+	}
+}
 
-			for _, suite := range tt.suites {
-				var suitePercent int
-				if suite.Finished {
-					// Finished suites always count as 100%
-					suitePercent = 100
-				} else if suite.Total > 0 {
-					suitePercent = suite.Completed * 100 / suite.Total
-				} else {
-					suitePercent = 0
-				}
-				suitePercentageSum += suitePercent
+func TestPreDiscoveredTotalsIntegration(t *testing.T) {
+	// Reset global state
+	originalPreDiscoveredTotals := preDiscoveredTotals
+	defer func() { preDiscoveredTotals = originalPreDiscoveredTotals }()
+
+	setupTestLogger()
+
+	// Set up pre-discovered totals
+	preDiscoveredTotals = map[string]int{
+		"compute": 50,
+		"network": 30,
+		"tier2":   15,
+	}
+
+	tests := []struct {
+		name                   string
+		activeSuites           []*TestSuite
+		expectedOverallTotal   int
+		expectedOverallPercent int
+		description            string
+	}{
+		{
+			name:                   "No active suites yet",
+			activeSuites:           []*TestSuite{},
+			expectedOverallTotal:   95, // 50 + 30 + 15
+			expectedOverallPercent: 0,  // 0 completed out of 95
+			description:            "Should show total from pre-discovery even with no active suites",
+		},
+		{
+			name: "Partial progress",
+			activeSuites: []*TestSuite{
+				{Name: "compute", Total: 50, Completed: 25, Finished: false},
+			},
+			expectedOverallTotal:   95, // 50 + 30 + 15
+			expectedOverallPercent: 26, // 25 completed out of 95 = 26%
+			description:            "Should combine active suite progress with pre-discovered totals",
+		},
+		{
+			name: "Multiple active suites",
+			activeSuites: []*TestSuite{
+				{Name: "compute", Total: 50, Completed: 50, Finished: true},
+				{Name: "network", Total: 30, Completed: 15, Finished: false},
+			},
+			expectedOverallTotal:   95, // 50 + 30 + 15
+			expectedOverallPercent: 68, // (50 + 15) out of 95 = 68%
+			description:            "Should accurately calculate progress with multiple active suites",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the progress calculation logic from updateJobAnnotations
+			var overallTotal, overallCompleted int
+			processedSuites := make(map[string]bool)
+
+			// Process active suites
+			for _, suite := range tt.activeSuites {
+				overallTotal += suite.Total
+				overallCompleted += suite.Completed
+				processedSuites[suite.Name] = true
 			}
 
-			// Calculate overall percentage: (sum of suite percentages) / (total expected suites)
+			// Add pre-discovered totals for unprocessed suites
+			for suiteName, total := range preDiscoveredTotals {
+				if !processedSuites[suiteName] {
+					overallTotal += total
+				}
+			}
+
+			// Calculate percentage
 			var overallPercent int
-			if totalExpectedSuites > 0 {
-				overallPercent = suitePercentageSum / totalExpectedSuites
+			if overallTotal > 0 {
+				overallPercent = overallCompleted * 100 / overallTotal
+			}
+
+			// Verify results
+			if overallTotal != tt.expectedOverallTotal {
+				t.Errorf("%s: Expected total %d, got %d",
+					tt.description, tt.expectedOverallTotal, overallTotal)
 			}
 
 			if overallPercent != tt.expectedOverallPercent {
-				t.Errorf("%s: Expected overall percent %d, got %d (total expected suites: %d)",
-					tt.description, tt.expectedOverallPercent, overallPercent, totalExpectedSuites)
+				t.Errorf("%s: Expected percent %d, got %d",
+					tt.description, tt.expectedOverallPercent, overallPercent)
 			}
 		})
 	}

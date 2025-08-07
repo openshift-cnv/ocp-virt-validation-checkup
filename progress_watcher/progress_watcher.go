@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ import (
 var (
 	resultsDir = flag.String("results-dir", "", "Directory containing test suite log files")
 	stdout     = flag.Bool("stdout", false, "Also output progress to stdout (default: false, always writes to log file)")
+	skipDryRun = flag.Bool("skip-dry-run", false, "Skip dry-run discovery and use dynamic total discovery instead")
 )
 
 var (
@@ -38,6 +40,8 @@ var (
 	logFile *os.File
 	// Previous progress state for change detection
 	previousProgress *ProgressState
+	// Pre-discovered test totals from dry-run
+	preDiscoveredTotals map[string]int
 )
 
 // TestSuite represents a single test suite being monitored
@@ -46,7 +50,11 @@ type TestSuite struct {
 	LogFile   string
 	Total     int
 	Completed int
+	Passed    int
+	Failed    int
 	Finished  bool
+	StartTime time.Time
+	EndTime   time.Time
 	Reader    *bufio.Reader
 	File      *os.File
 }
@@ -64,8 +72,11 @@ type ProgressState struct {
 type SuiteState struct {
 	Total     int
 	Completed int
+	Passed    int
+	Failed    int
 	Percent   int
 	Finished  bool
+	Duration  time.Duration
 }
 
 // DuplicateFilterWriter wraps an io.Writer and filters out consecutive duplicate lines
@@ -144,6 +155,35 @@ func main() {
 	logger.Println("Progress watcher starting...")
 
 	clientset := getClientset()
+
+	// Initialize pre-discovered totals
+	preDiscoveredTotals = make(map[string]int)
+
+	// Discover test totals upfront using dry-run (unless skipped)
+	if !*skipDryRun {
+		logger.Println("Running dry-run discovery to determine total test counts...")
+
+		// Run with timeout to avoid hanging
+		done := make(chan bool, 1)
+		go func() {
+			preDiscoveredTotals = discoverTestTotalsByDryRun(*resultsDir)
+			done <- true
+		}()
+
+		select {
+		case <-done:
+			totalTests := 0
+			for _, count := range preDiscoveredTotals {
+				totalTests += count
+			}
+			logger.Printf("Pre-discovery complete: %d total tests across %d suites\n", totalTests, len(preDiscoveredTotals))
+		case <-time.After(2 * time.Minute):
+			logger.Println("Dry-run discovery timed out after 2 minutes, falling back to dynamic discovery")
+			preDiscoveredTotals = make(map[string]int) // Reset to empty
+		}
+	} else {
+		logger.Println("Skipping dry-run discovery, will use dynamic total discovery")
+	}
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -269,10 +309,16 @@ func discoverTestSuites(resultsDir string) []*TestSuite {
 
 	for suiteName, logPath := range suitePatterns {
 		if _, err := os.Stat(logPath); err == nil {
-			suites = append(suites, &TestSuite{
-				Name:    suiteName,
-				LogFile: logPath,
-			})
+			suite := &TestSuite{
+				Name:      suiteName,
+				LogFile:   logPath,
+				StartTime: time.Now(), // Mark when we first discover the suite
+			}
+			// Use pre-discovered total if available
+			if total, exists := preDiscoveredTotals[suiteName]; exists {
+				suite.Total = total
+			}
+			suites = append(suites, suite)
 		}
 	}
 
@@ -300,9 +346,131 @@ func getTotalExpectedSuites() int {
 	return count
 }
 
+// discoverTestTotalsByDryRun runs dry-run commands to discover total test counts upfront
+func discoverTestTotalsByDryRun(resultsDir string) map[string]int {
+	totals := make(map[string]int)
+
+	// Get configured test suites
+	testSuitesEnv := os.Getenv("TEST_SUITES")
+	if testSuitesEnv == "" {
+		testSuitesEnv = "compute,network,storage,ssp,tier2" // Default all suites
+	}
+
+	configuredSuites := strings.Split(testSuitesEnv, ",")
+	for _, suiteName := range configuredSuites {
+		suiteName = strings.TrimSpace(suiteName)
+		if suiteName == "" {
+			continue
+		}
+
+		logger.Printf("Discovering test total for suite: %s\n", suiteName)
+		total := runDryRunForSuite(suiteName, resultsDir)
+		if total > 0 {
+			totals[suiteName] = total
+			logger.Printf("Discovered %d tests for suite %s\n", total, suiteName)
+		} else {
+			logger.Printf("Could not discover test count for suite %s (suite might not be available)\n", suiteName)
+		}
+	}
+
+	return totals
+}
+
+// runDryRunForSuite runs a dry-run command for a specific test suite and returns the test count
+func runDryRunForSuite(suiteName, resultsDir string) int {
+	// Create results directory for this suite
+	suiteResultsDir := filepath.Join(resultsDir, suiteName)
+	if err := os.MkdirAll(suiteResultsDir, 0755); err != nil {
+		logger.Printf("Failed to create results directory for %s: %v\n", suiteName, err)
+		return 0
+	}
+
+	var cmd *exec.Cmd
+	var env []string
+
+	// Set up environment variables
+	env = append(os.Environ(),
+		"DRY_RUN=true",
+		fmt.Sprintf("RESULTS_DIR=%s", resultsDir),
+		fmt.Sprintf("ARTIFACTS=%s", suiteResultsDir),
+	)
+
+	switch suiteName {
+	case "compute":
+		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		env = append(env, "SIG=compute")
+	case "network":
+		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		env = append(env, "SIG=network")
+	case "storage":
+		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		env = append(env, "SIG=storage")
+	case "ssp":
+		cmd = exec.Command("/bin/bash", "/scripts/ssp/test-ssp.sh")
+	case "tier2":
+		cmd = exec.Command("/bin/bash", "/scripts/tier2/test-tier2.sh")
+	default:
+		logger.Printf("Unknown test suite: %s\n", suiteName)
+		return 0
+	}
+
+	cmd.Env = env
+	cmd.Dir = "/"
+
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Printf("Dry-run failed for %s: %v\n", suiteName, err)
+		// Don't return 0 immediately, try to parse output anyway in case partial info is available
+	}
+
+	// Parse the output to extract test count
+	return parseTestCountFromDryRun(string(output), suiteName)
+}
+
+// parseTestCountFromDryRun extracts test count from dry-run output
+func parseTestCountFromDryRun(output, suiteName string) int {
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Try Ginkgo pattern (for compute, network, storage)
+		if match := specRegex.FindStringSubmatch(line); match != nil {
+			var count int
+			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				return count
+			}
+		}
+
+		// Try pytest pattern (for tier2)
+		if match := pytestRegex.FindStringSubmatch(line); match != nil {
+			var count int
+			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				return count
+			}
+		}
+
+		// Additional patterns for different test frameworks
+		if strings.Contains(line, "tests to run") || strings.Contains(line, "test cases") {
+			// Try to extract number from various patterns
+			re := regexp.MustCompile(`(\d+)\s+(?:tests?|test cases?|specs?)`)
+			if match := re.FindStringSubmatch(line); match != nil {
+				var count int
+				if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+					return count
+				}
+			}
+		}
+	}
+
+	logger.Printf("Could not parse test count from dry-run output for %s\n", suiteName)
+	return 0
+}
+
 // processSuiteLine processes a single line from a test suite log
 func processSuiteLine(suite *TestSuite, line string) {
-	// Check for total specs detection (Ginkgo)
+	// Check for total specs detection (Ginkgo) - only if we don't already have a pre-discovered total
 	if suite.Total == 0 {
 		if match := specRegex.FindStringSubmatch(line); match != nil {
 			logger.Printf("[%s] Detected total specs: %s\n", suite.Name, match[1])
@@ -315,18 +483,37 @@ func processSuiteLine(suite *TestSuite, line string) {
 			fmt.Sscanf(match[1], "%d", &suite.Total)
 			return
 		}
+	} else {
+		// We have a pre-discovered total, just validate it matches what we see in logs
+		if match := specRegex.FindStringSubmatch(line); match != nil {
+			var detectedTotal int
+			fmt.Sscanf(match[1], "%d", &detectedTotal)
+			if detectedTotal != suite.Total {
+				logger.Printf("[%s] Warning: detected total (%d) differs from pre-discovered total (%d)\n",
+					suite.Name, detectedTotal, suite.Total)
+			}
+			return
+		}
+		if match := pytestRegex.FindStringSubmatch(line); match != nil {
+			var detectedTotal int
+			fmt.Sscanf(match[1], "%d", &detectedTotal)
+			if detectedTotal != suite.Total {
+				logger.Printf("[%s] Warning: detected total (%d) differs from pre-discovered total (%d)\n",
+					suite.Name, detectedTotal, suite.Total)
+			}
+			return
+		}
 	}
 
 	// Check for suite completion indicators
 	if !suite.Finished {
 		// Common completion patterns that indicate the suite has finished
 		finishPatterns := []string{
-			"Ran ",                // Ginkgo final summary
-			"===",                 // Pytest session summary
-			"PASS:",               // Final pass/fail status
-			"FAIL:",               // Final pass/fail status
-			"tests completed",     // Generic completion
-			"test session starts", // End of pytest session
+			"Ran ",                    // Ginkgo final summary
+			"short test summary info", // Pytest session summary
+			"PASS:",                   // Final pass/fail status
+			"FAIL:",                   // Final pass/fail status
+			"tests completed",         // Generic completion
 		}
 
 		for _, pattern := range finishPatterns {
@@ -334,7 +521,8 @@ func processSuiteLine(suite *TestSuite, line string) {
 				strings.Contains(line, "passed") || strings.Contains(line, "failed") ||
 				strings.Contains(line, "complete")) {
 				suite.Finished = true
-				logger.Printf("[%s] Suite finished\n", suite.Name)
+				suite.EndTime = time.Now()
+				logger.Printf("[%s] Suite finished in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 				break
 			}
 		}
@@ -342,32 +530,78 @@ func processSuiteLine(suite *TestSuite, line string) {
 		// Also check if we've reached total completion
 		if suite.Total > 0 && suite.Completed >= suite.Total {
 			suite.Finished = true
-			logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+			suite.EndTime = time.Now()
+			logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 		}
 	}
 
-	// Check for completed tests
+	// Check for completed tests and track pass/fail status
 	if !suite.Finished { // Only count new completions if not finished
 		if strings.HasPrefix(line, "•") { // Ginkgo test completion
 			suite.Completed++
-			logger.Printf("[%s] Completed: %d/%d\n", suite.Name, suite.Completed, suite.Total)
+			// For Ginkgo, • usually indicates a pass, but we'll track specific patterns below
+			suite.Passed++
+			logger.Printf("[%s] Completed: %d/%d (passed: %d, failed: %d)\n",
+				suite.Name, suite.Completed, suite.Total, suite.Passed, suite.Failed)
 
 			// Check if we've now reached completion
 			if suite.Total > 0 && suite.Completed >= suite.Total {
 				suite.Finished = true
-				logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+				suite.EndTime = time.Now()
+				logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 			}
 		} else if strings.Contains(line, "PASSED") || strings.Contains(line, "FAILED") {
 			// Pytest test completion patterns
-			if strings.Contains(line, "::test_") || strings.Contains(line, " test_") {
+			if strings.HasPrefix(line, "TEST:") {
 				suite.Completed++
-				logger.Printf("[%s] Completed: %d/%d\n", suite.Name, suite.Completed, suite.Total)
+				if strings.Contains(line, "PASSED") {
+					suite.Passed++
+				} else if strings.Contains(line, "FAILED") {
+					suite.Failed++
+				}
+				logger.Printf("[%s] Completed: %d/%d (passed: %d, failed: %d)\n",
+					suite.Name, suite.Completed, suite.Total, suite.Passed, suite.Failed)
 
 				// Check if we've now reached completion
 				if suite.Total > 0 && suite.Completed >= suite.Total {
 					suite.Finished = true
-					logger.Printf("[%s] Suite finished (reached total count)\n", suite.Name)
+					suite.EndTime = time.Now()
+					logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 				}
+			}
+		}
+
+		// Check for individual Ginkgo test failures (F, S for fail/skip)
+		if strings.HasPrefix(line, "F") || strings.HasPrefix(line, "S") {
+			// This indicates a failed/skipped test in Ginkgo
+			// Adjust our previous assumption
+			if suite.Passed > 0 {
+				suite.Passed-- // Remove the automatic pass we added
+				suite.Failed++ // Count as failed
+				logger.Printf("[%s] Test failed/skipped - adjusted counts (passed: %d, failed: %d)\n",
+					suite.Name, suite.Passed, suite.Failed)
+			}
+		}
+
+		// Additional patterns for pass/fail detection from log summaries
+		if strings.Contains(line, "passed") && strings.Contains(line, "failed") {
+			// Try to extract final pass/fail counts from summary lines
+			// Pattern like: "5 passed, 2 failed"
+			passRegex := regexp.MustCompile(`(\d+)\s+passed`)
+			failRegex := regexp.MustCompile(`(\d+)\s+failed`)
+
+			if passMatch := passRegex.FindStringSubmatch(line); passMatch != nil {
+				var passCount int
+				fmt.Sscanf(passMatch[1], "%d", &passCount)
+				suite.Passed = passCount
+				logger.Printf("[%s] Updated pass count from summary: %d\n", suite.Name, passCount)
+			}
+
+			if failMatch := failRegex.FindStringSubmatch(line); failMatch != nil {
+				var failCount int
+				fmt.Sscanf(failMatch[1], "%d", &failCount)
+				suite.Failed = failCount
+				logger.Printf("[%s] Updated fail count from summary: %d\n", suite.Name, failCount)
 			}
 		}
 	}
@@ -438,8 +672,11 @@ func hasProgressChanged(currentState *ProgressState) bool {
 		if !exists ||
 			previousSuite.Total != currentSuite.Total ||
 			previousSuite.Completed != currentSuite.Completed ||
+			previousSuite.Passed != currentSuite.Passed ||
+			previousSuite.Failed != currentSuite.Failed ||
 			previousSuite.Percent != currentSuite.Percent ||
-			previousSuite.Finished != currentSuite.Finished {
+			previousSuite.Finished != currentSuite.Finished ||
+			previousSuite.Duration != currentSuite.Duration {
 			return true
 		}
 	}
@@ -463,15 +700,21 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		return fmt.Errorf("failed to get owning job: %v", err)
 	}
 
-	// Calculate progress using equal contribution per suite
-	var overallTotal, overallCompleted int
-	var suitePercentageSum int
-	totalExpectedSuites := getTotalExpectedSuites()
+	// Calculate progress based on actual test counts across all suites
+	// Include both discovered suites and pre-discovered totals for accurate progress
+	var overallTotal, overallCompleted, overallPassed, overallFailed int
 	annotations := make(map[string]string)
 
+	// Track which suites we've seen
+	processedSuites := make(map[string]bool)
+
+	// Process active/discovered suites
 	for _, suite := range suites {
 		overallTotal += suite.Total
 		overallCompleted += suite.Completed
+		overallPassed += suite.Passed
+		overallFailed += suite.Failed
+		processedSuites[suite.Name] = true
 
 		// Calculate suite percentage
 		var suitePercent int
@@ -484,20 +727,44 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 			suitePercent = 0
 		}
 
-		suitePercentageSum += suitePercent
-
 		// Store per-suite data as annotations
 		annotations[fmt.Sprintf("test-progress/%s-total", suite.Name)] = fmt.Sprintf("%d", suite.Total)
 		annotations[fmt.Sprintf("test-progress/%s-completed", suite.Name)] = fmt.Sprintf("%d", suite.Completed)
+		annotations[fmt.Sprintf("test-progress/%s-passed", suite.Name)] = fmt.Sprintf("%d", suite.Passed)
+		annotations[fmt.Sprintf("test-progress/%s-failed", suite.Name)] = fmt.Sprintf("%d", suite.Failed)
 		annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = fmt.Sprintf("%d", suitePercent)
 		annotations[fmt.Sprintf("test-progress/%s-finished", suite.Name)] = fmt.Sprintf("%t", suite.Finished)
+
+		// Only add duration annotation when suite has finished
+		if suite.Finished && !suite.EndTime.IsZero() {
+			suiteDuration := suite.EndTime.Sub(suite.StartTime)
+			annotations[fmt.Sprintf("test-progress/%s-duration", suite.Name)] = suiteDuration.String()
+		}
 	}
 
-	// Calculate overall percentage: (sum of suite percentages) / (total expected suites)
-	// Each suite contributes equally to the overall progress
+	// Add pre-discovered totals for suites that haven't started yet
+	for suiteName, total := range preDiscoveredTotals {
+		if !processedSuites[suiteName] {
+			// Suite hasn't started yet, but we know its total
+			overallTotal += total
+			// overallCompleted += 0 (implicit, no progress yet)
+
+			// Store annotations for not-yet-started suites (no duration annotation)
+			annotations[fmt.Sprintf("test-progress/%s-total", suiteName)] = fmt.Sprintf("%d", total)
+			annotations[fmt.Sprintf("test-progress/%s-completed", suiteName)] = "0"
+			annotations[fmt.Sprintf("test-progress/%s-passed", suiteName)] = "0"
+			annotations[fmt.Sprintf("test-progress/%s-failed", suiteName)] = "0"
+			annotations[fmt.Sprintf("test-progress/%s-percent", suiteName)] = "0"
+			annotations[fmt.Sprintf("test-progress/%s-finished", suiteName)] = "false"
+			// Duration annotation only added when suite finishes
+		}
+	}
+
+	// Calculate overall percentage based on total test count across all suites
+	// Progress = (total completed tests / total tests) * 100
 	var overallPercent int
-	if totalExpectedSuites > 0 {
-		overallPercent = suitePercentageSum / totalExpectedSuites
+	if overallTotal > 0 {
+		overallPercent = overallCompleted * 100 / overallTotal
 	}
 
 	// Build current progress state for change detection
@@ -518,11 +785,21 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		} else if suite.Total > 0 {
 			percent = suite.Completed * 100 / suite.Total
 		}
+
+		var suiteDuration time.Duration
+		// Only track duration for change detection if suite has finished
+		if suite.Finished && !suite.EndTime.IsZero() {
+			suiteDuration = suite.EndTime.Sub(suite.StartTime)
+		}
+
 		currentState.SuiteProgress[suite.Name] = SuiteState{
 			Total:     suite.Total,
 			Completed: suite.Completed,
+			Passed:    suite.Passed,
+			Failed:    suite.Failed,
 			Percent:   percent,
 			Finished:  suite.Finished,
+			Duration:  suiteDuration,
 		}
 	}
 
@@ -532,6 +809,8 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 	// Store overall data as annotations
 	annotations["test-progress/total"] = fmt.Sprintf("%d", overallTotal)
 	annotations["test-progress/completed"] = fmt.Sprintf("%d", overallCompleted)
+	annotations["test-progress/passed"] = fmt.Sprintf("%d", overallPassed)
+	annotations["test-progress/failed"] = fmt.Sprintf("%d", overallFailed)
 	annotations["test-progress/percent"] = fmt.Sprintf("%d", overallPercent)
 	annotations["test-progress/active-suites"] = fmt.Sprintf("%d", len(suites))
 

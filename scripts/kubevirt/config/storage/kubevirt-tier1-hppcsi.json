@@ -1,0 +1,5 @@
+{
+    "storageClassRhel":        "hostpath-csi-basic",
+    "storageClassWindows":     "hostpath-csi-basic",
+    "storageRWOFileSystem":    "hostpath-csi-basic"
+}

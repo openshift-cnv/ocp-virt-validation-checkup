@@ -1,0 +1,5 @@
+{
+    "storageClassRhel":        "hostpath-provisioner",
+    "storageClassWindows":     "hostpath-provisioner",
+    "storageRWOFileSystem":    "hostpath-provisioner"
+}

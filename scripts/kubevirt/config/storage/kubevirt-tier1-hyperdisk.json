@@ -1,0 +1,8 @@
+{
+    "storageClassRhel":        "sp-balanced-storage",
+    "storageClassWindows":     "sp-balanced-storage",
+    "storageRWXBlock":         "sp-balanced-storage",
+    "storageRWOFileSystem":    "sp-balanced-storage",
+    "storageRWOBlock":         "sp-balanced-storage",
+    "storageSnapshot":         "sp-balanced-storage-rwo"
+}

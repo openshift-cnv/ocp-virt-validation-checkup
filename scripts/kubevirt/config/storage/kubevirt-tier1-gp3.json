@@ -1,0 +1,7 @@
+{
+    "storageClassRhel":        "gp3",
+    "storageClassWindows":     "gp3",
+    "storageRWOBlock":         "gp3",
+    "storageRWOFileSystem":    "gp3",
+    "storageSnapshot":         "gp3"
+}
