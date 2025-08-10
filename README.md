@@ -97,7 +97,7 @@ spec:
             - name: RESULTS_DIR
               value: /results
             - name: TEST_SUITES
-              value: compute,network,storage,ssp
+              value: compute,network,storage,ssp,tier2
             - name: TEST_SKIPS
               value: ""
           volumeMounts:
@@ -125,14 +125,15 @@ The default settings of the validation checkup can be modified before the execut
 #### Test Suites
 By default, the validation checkup will run all of the test suites.  
 It is possible to configure a subset of the suites to run. The available test suites are:
-* `compute`
-* `network`
-* `storage`
-* `ssp`
+* `compute` - conformance tests with `sig-compute` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository.
+* `network` - conformance tests with `sig-network` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
+* `storage` - conformance tests with `sig-storage` and `StorageCritical` from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
+* `ssp` - tests from [ssp-operator](https://github.com/kubevirt/ssp-operator/tree/main/tests) repository.
+* `tier2` - Conformance tests from [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository.
 
 Use the `TEST_SUITES` environment variable, with a comma separated list of the desired suites, when running the `generate` script. The example below shows how to run only the `compute` and the `network` suites, by setting `TEST_SUITES` to `"compute,network"`:
 ```bash
-$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=compute,network ${OCP_VIRT_VALIDATION_IMAGE} generate
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=compute,network,tier2 ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 This will configure the following environment variable for the job:
 ```yaml
@@ -145,7 +146,7 @@ spec:
         - name: ocp-virt-validation-checkup
           env:
             - name: TEST_SUITES
-              value: compute,network
+              value: compute,network,tier2
 ```
 
 **Note:** the value passed to `TEST_SUITES` should be comma-separated.
@@ -165,6 +166,44 @@ Example:
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e STORAGE_CLASS=ocs-storagecluster-ceph-rbd-virtualization ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 If no `STORAGE_CLASS` environment variable is set, the default storage class in the cluster will be used for the checkup.
+
+#### Storage Capabilities
+The storage capabilities (such as: volume mode, access mode, snapshot support, etc.) are resolved based on the storage class name, using a predefined list of known storage providers. If the selected storage provider is not known, the `STORAGE_CAPABILITIES` env var must be passed, to instruct the tests what are the storage capabilities that should be put under tests.  
+The syntax of `STORAGE_CAPABILITIES` env var is a comma-separated list of these properties:
+- storageClassRhel
+- storageClassWindows
+- storageRWXBlock
+- storageRWXFileSystem
+- storageRWOFileSystem
+- storageRWOBlock
+- storageSnapshot
+- onlineResize
+- WFFC
+
+It is possible to set any subset of this list, according to the actual capabilities of the specified storage class.
+Example:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e STORAGE_CLASS=my-awesome-sc -e STORAGE_CAPABILITIES=storageClassRhel,storageRWXFileSystem,storageRWOBlock,onlineResize ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+Which will produce the following Job yaml (only the relevant section is displayed):
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ocp-virt-validation-job-20250810-101901
+  namespace: ocp-virt-validation
+spec:
+  template:
+    spec:
+      containers:
+        - name: ocp-virt-validation-checkup
+          env:
+            - name: STORAGE_CLASS
+              value: my-awesome-sc
+            - name: STORAGE_CAPABILITIES
+              value: storageClassRhel,storageRWXFileSystem,storageRWOBlock,onlineResize
+...
+```
 
 #### Dry Run
 In order to see which tests are going to be run, without actually executing them on the cluster, a `DRY_RUN` environment variable can be set:

@@ -29,6 +29,7 @@ var (
 	resultsDir = flag.String("results-dir", "", "Directory containing test suite log files")
 	stdout     = flag.Bool("stdout", false, "Also output progress to stdout (default: false, always writes to log file)")
 	skipDryRun = flag.Bool("skip-dry-run", false, "Skip dry-run discovery and use dynamic total discovery instead")
+	verbose    = flag.Bool("verbose", false, "Enable verbose logging for debugging (shows every line processed)")
 )
 
 var (
@@ -249,6 +250,9 @@ func main() {
 					}
 
 					line = strings.TrimSpace(line)
+					if *verbose && line != "" {
+						logger.Printf("[%s] Processing line: %q\n", suite.Name, line)
+					}
 					processSuiteLine(suite, line)
 				}
 			}
@@ -350,6 +354,18 @@ func getTotalExpectedSuites() int {
 func discoverTestTotalsByDryRun(resultsDir string) map[string]int {
 	totals := make(map[string]int)
 
+	// Create dry-run directory
+	dryRunBaseDir := filepath.Join(resultsDir, ".dry-run")
+
+	// Clean up dry-run directory when done
+	defer func() {
+		if err := os.RemoveAll(dryRunBaseDir); err != nil {
+			logger.Printf("Warning: Failed to clean up dry-run directory: %v\n", err)
+		} else if *verbose {
+			logger.Printf("DEBUG: Cleaned up dry-run directory: %s\n", dryRunBaseDir)
+		}
+	}()
+
 	// Get configured test suites
 	testSuitesEnv := os.Getenv("TEST_SUITES")
 	if testSuitesEnv == "" {
@@ -378,54 +394,161 @@ func discoverTestTotalsByDryRun(resultsDir string) map[string]int {
 
 // runDryRunForSuite runs a dry-run command for a specific test suite and returns the test count
 func runDryRunForSuite(suiteName, resultsDir string) int {
-	// Create results directory for this suite
-	suiteResultsDir := filepath.Join(resultsDir, suiteName)
+	// Create a separate dry-run directory to avoid interfering with actual test monitoring
+	dryRunBaseDir := filepath.Join(resultsDir, ".dry-run")
+	suiteResultsDir := filepath.Join(dryRunBaseDir, suiteName)
 	if err := os.MkdirAll(suiteResultsDir, 0755); err != nil {
-		logger.Printf("Failed to create results directory for %s: %v\n", suiteName, err)
+		logger.Printf("Failed to create dry-run results directory for %s: %v\n", suiteName, err)
 		return 0
+	}
+
+	// Determine script directory - same logic as entrypoint.sh
+	// Try multiple methods to find the script directory
+	scriptDir := ""
+
+	// Method 1: Check SCRIPT_DIR environment variable (set by entrypoint.sh)
+	if envScriptDir := os.Getenv("SCRIPT_DIR"); envScriptDir != "" {
+		scriptDir = envScriptDir
+		if *verbose {
+			logger.Printf("[%s] DEBUG: Using SCRIPT_DIR from environment: %s\n", suiteName, scriptDir)
+		}
+	} else {
+		// Method 2: Try common locations
+		possibleDirs := []string{
+			"/scripts",           // Default container location
+			"/workspace/scripts", // Alternative container location
+			"./scripts",          // Relative to current directory
+			"../scripts",         // Relative to binary location
+		}
+
+		for _, dir := range possibleDirs {
+			kubevirtScript := filepath.Join(dir, "kubevirt", "test-kubevirt.sh")
+			if fileExists(kubevirtScript) {
+				// Convert relative paths to absolute paths
+				if !filepath.IsAbs(dir) {
+					absDir, err := filepath.Abs(dir)
+					if err == nil {
+						scriptDir = absDir
+					} else {
+						scriptDir = dir
+					}
+				} else {
+					scriptDir = dir
+				}
+				if *verbose {
+					logger.Printf("[%s] DEBUG: Found scripts directory at: %s\n", suiteName, scriptDir)
+				}
+				break
+			}
+		}
+
+		if scriptDir == "" {
+			logger.Printf("[%s] ERROR: Could not find scripts directory\n", suiteName)
+			return 0
+		}
 	}
 
 	var cmd *exec.Cmd
 	var env []string
 
-	// Set up environment variables
+	// Set up environment variables - same as entrypoint.sh
+	// Use the dry-run base directory to avoid interfering with actual test monitoring
 	env = append(os.Environ(),
 		"DRY_RUN=true",
-		fmt.Sprintf("RESULTS_DIR=%s", resultsDir),
+		"DRY_RUN_FLAG=--ginkgo.dry-run",
+		fmt.Sprintf("RESULTS_DIR=%s", dryRunBaseDir),
 		fmt.Sprintf("ARTIFACTS=%s", suiteResultsDir),
+		fmt.Sprintf("SCRIPT_DIR=%s", scriptDir),
 	)
+
+	// Add suite-specific environment variables
+	if suiteName == "tier2" {
+		// tier2 needs storage class and subscription info
+		if storageClass := os.Getenv("STORAGE_CLASS"); storageClass != "" {
+			env = append(env, fmt.Sprintf("STORAGE_CLASS=%s", storageClass))
+		}
+		if defaultStorageClass := os.Getenv("DEFAULT_STORAGE_CLASS"); defaultStorageClass != "" {
+			env = append(env, fmt.Sprintf("DEFAULT_STORAGE_CLASS=%s", defaultStorageClass))
+		}
+		if subscriptionName := os.Getenv("SUBSCRIPTION_NAME"); subscriptionName != "" {
+			env = append(env, fmt.Sprintf("SUBSCRIPTION_NAME=%s", subscriptionName))
+		}
+	}
 
 	switch suiteName {
 	case "compute":
-		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		kubevirtScript := filepath.Join(scriptDir, "kubevirt", "test-kubevirt.sh")
+		cmd = exec.Command("/bin/bash", kubevirtScript)
 		env = append(env, "SIG=compute")
 	case "network":
-		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		kubevirtScript := filepath.Join(scriptDir, "kubevirt", "test-kubevirt.sh")
+		cmd = exec.Command("/bin/bash", kubevirtScript)
 		env = append(env, "SIG=network")
 	case "storage":
-		cmd = exec.Command("/bin/bash", "/scripts/kubevirt/test-kubevirt.sh")
+		kubevirtScript := filepath.Join(scriptDir, "kubevirt", "test-kubevirt.sh")
+		cmd = exec.Command("/bin/bash", kubevirtScript)
 		env = append(env, "SIG=storage")
 	case "ssp":
-		cmd = exec.Command("/bin/bash", "/scripts/ssp/test-ssp.sh")
+		sspScript := filepath.Join(scriptDir, "ssp", "test-ssp.sh")
+		cmd = exec.Command("/bin/bash", sspScript)
 	case "tier2":
-		cmd = exec.Command("/bin/bash", "/scripts/tier2/test-tier2.sh")
+		tier2Script := filepath.Join(scriptDir, "tier2", "test-tier2.sh")
+		cmd = exec.Command("/bin/bash", tier2Script)
 	default:
 		logger.Printf("Unknown test suite: %s\n", suiteName)
 		return 0
 	}
 
 	cmd.Env = env
-	cmd.Dir = "/"
+
+	// Set working directory to the parent of the script directory
+	// This ensures relative paths in scripts work correctly
+	if filepath.IsAbs(scriptDir) {
+		cmd.Dir = filepath.Dir(scriptDir)
+	} else {
+		// If somehow we still have a relative path, use current working directory
+		if cwd, err := os.Getwd(); err == nil {
+			cmd.Dir = cwd
+		} else {
+			cmd.Dir = "/"
+		}
+	}
+
+	if *verbose {
+		logger.Printf("[%s] DEBUG: Executing dry-run command: %s %v\n", suiteName, cmd.Path, cmd.Args)
+		logger.Printf("[%s] DEBUG: Working directory: %s\n", suiteName, cmd.Dir)
+		logger.Printf("[%s] DEBUG: Script path exists: %v\n", suiteName, fileExists(cmd.Args[1]))
+		logger.Printf("[%s] DEBUG: Script directory (absolute): %s\n", suiteName, scriptDir)
+	}
 
 	// Capture output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.Printf("Dry-run failed for %s: %v\n", suiteName, err)
+		if *verbose {
+			logger.Printf("[%s] DEBUG: Dry-run output (first 500 chars): %s\n", suiteName, truncateString(string(output), 500))
+		}
 		// Don't return 0 immediately, try to parse output anyway in case partial info is available
+	} else if *verbose {
+		logger.Printf("[%s] DEBUG: Dry-run succeeded, output length: %d chars\n", suiteName, len(output))
 	}
 
 	// Parse the output to extract test count
 	return parseTestCountFromDryRun(string(output), suiteName)
+}
+
+// fileExists checks if a file exists
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return !os.IsNotExist(err)
+}
+
+// truncateString truncates a string to a maximum length
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // parseTestCountFromDryRun extracts test count from dry-run output
@@ -522,7 +645,8 @@ func processSuiteLine(suite *TestSuite, line string) {
 				strings.Contains(line, "complete")) {
 				suite.Finished = true
 				suite.EndTime = time.Now()
-				logger.Printf("[%s] Suite finished in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
+				logger.Printf("[%s] Suite finished in %v (pattern: %s, line: %q)\n",
+					suite.Name, suite.EndTime.Sub(suite.StartTime), pattern, line)
 				break
 			}
 		}
@@ -538,9 +662,24 @@ func processSuiteLine(suite *TestSuite, line string) {
 	// Check for completed tests and track pass/fail status
 	if !suite.Finished { // Only count new completions if not finished
 		if strings.HasPrefix(line, "•") { // Ginkgo test completion
+			if *verbose {
+				logger.Printf("[%s] DEBUG: Found bullet point: %q\n", suite.Name, line)
+			}
 			suite.Completed++
-			// For Ginkgo, • usually indicates a pass, but we'll track specific patterns below
-			suite.Passed++
+
+			// Check if this bullet point indicates a failure or a pass
+			if strings.Contains(line, "[FAILED]") {
+				suite.Failed++
+				if *verbose {
+					logger.Printf("[%s] DEBUG: Bullet point contains [FAILED], counting as failed\n", suite.Name)
+				}
+			} else {
+				suite.Passed++
+				if *verbose {
+					logger.Printf("[%s] DEBUG: Bullet point without [FAILED], counting as passed\n", suite.Name)
+				}
+			}
+
 			logger.Printf("[%s] Completed: %d/%d (passed: %d, failed: %d)\n",
 				suite.Name, suite.Completed, suite.Total, suite.Passed, suite.Failed)
 
@@ -570,20 +709,32 @@ func processSuiteLine(suite *TestSuite, line string) {
 				}
 			}
 		}
-
-		// Check for individual Ginkgo test failures (F, S for fail/skip)
-		if strings.HasPrefix(line, "F") || strings.HasPrefix(line, "S") {
-			// This indicates a failed/skipped test in Ginkgo
-			// Adjust our previous assumption
-			if suite.Passed > 0 {
-				suite.Passed-- // Remove the automatic pass we added
-				suite.Failed++ // Count as failed
-				logger.Printf("[%s] Test failed/skipped - adjusted counts (passed: %d, failed: %d)\n",
-					suite.Name, suite.Passed, suite.Failed)
-			}
+	} else {
+		// Suite is finished - add debug logging for bullet points
+		if *verbose && strings.HasPrefix(line, "•") {
+			logger.Printf("[%s] DEBUG: Suite is finished, ignoring bullet point in line: %q\n", suite.Name, line)
 		}
+	}
 
-		// Additional patterns for pass/fail detection from log summaries
+	// Check for standalone Ginkgo failure indicators (F, S for fail/skip) - only when not finished
+	// Note: These are summary/status lines, not individual test results
+	if !suite.Finished {
+		if strings.HasPrefix(line, "F") || strings.HasPrefix(line, "S") {
+			if *verbose {
+				indicator := "failure"
+				if strings.HasPrefix(line, "S") {
+					indicator = "skip"
+				}
+				logger.Printf("[%s] DEBUG: Found standalone %s indicator line: %q (summary/status, not adjusting counts)\n",
+					suite.Name, indicator, line)
+			}
+			// These are summary indicators, not individual test results
+			// Individual test pass/fail is determined by the • lines themselves
+		}
+	}
+
+	// Additional patterns for pass/fail detection from log summaries - only when not finished
+	if !suite.Finished {
 		if strings.Contains(line, "passed") && strings.Contains(line, "failed") {
 			// Try to extract final pass/fail counts from summary lines
 			// Pattern like: "5 passed, 2 failed"

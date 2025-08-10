@@ -124,7 +124,7 @@ if [ -n "${STORAGE_CAPABILITIES}" ]; then
   echo "Processing custom storage capabilities: ${STORAGE_CAPABILITIES}"
   
   # Define valid storage capabilities
-  valid_capabilities=("storageClassRhel" "storageClassWindows" "storageRWXBlock" "storageRWXFileSystem" "storageRWOFileSystem" "storageRWOBlock" "storageSnapshot")
+  valid_capabilities=("storageClassRhel" "storageClassWindows" "storageRWXBlock" "storageRWXFileSystem" "storageRWOFileSystem" "storageRWOBlock" "storageSnapshot" "onlineResize" "WFFC")
   
   # Validate STORAGE_CAPABILITIES format and content
   IFS=',' read -ra capabilities_array <<< "${STORAGE_CAPABILITIES}"

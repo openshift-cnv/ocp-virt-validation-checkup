@@ -38,7 +38,7 @@ fi
 
 # Validate STORAGE_CAPABILITIES if provided
 if [[ -n "${STORAGE_CAPABILITIES}" ]]; then
-  valid_capabilities=("storageClassRhel" "storageClassWindows" "storageRWXBlock" "storageRWXFileSystem" "storageRWOFileSystem" "storageRWOBlock" "storageSnapshot")
+  valid_capabilities=("storageClassRhel" "storageClassWindows" "storageRWXBlock" "storageRWXFileSystem" "storageRWOFileSystem" "storageRWOBlock" "storageSnapshot" "onlineResize" "WFFC")
   
   # Parse comma-separated capabilities
   IFS=',' read -ra capabilities_array <<< "${STORAGE_CAPABILITIES}"

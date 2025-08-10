@@ -221,13 +221,39 @@ func TestProcessSuiteLine(t *testing.T) {
 			expectedFailed:    0,
 		},
 		{
-			name: "Ginkgo test completion",
+			name: "Ginkgo test completion (passed)",
 			suite: &TestSuite{
 				Name:      "compute",
 				Total:     10,
 				Completed: 5,
 			},
 			line:              "• test passed",
+			expectedTotal:     10,
+			expectedCompleted: 6,
+			expectedPassed:    1,
+			expectedFailed:    0,
+		},
+		{
+			name: "Ginkgo test completion (failed)",
+			suite: &TestSuite{
+				Name:      "compute",
+				Total:     10,
+				Completed: 5,
+			},
+			line:              "• test [FAILED]",
+			expectedTotal:     10,
+			expectedCompleted: 6,
+			expectedPassed:    0,
+			expectedFailed:    1,
+		},
+		{
+			name: "Ginkgo test with timing (passed)",
+			suite: &TestSuite{
+				Name:      "compute",
+				Total:     10,
+				Completed: 5,
+			},
+			line:              "• [17.249 seconds]",
 			expectedTotal:     10,
 			expectedCompleted: 6,
 			expectedPassed:    1,
@@ -317,14 +343,14 @@ func TestPassFailCounting(t *testing.T) {
 			inputLines: []string{
 				"• test 1 passes",
 				"• test 2 passes",
-				"F test 3 fails",
+				"• test 3 [FAILED]",
 				"• test 4 passes",
 			},
 			initialSuite:      TestSuite{Name: "compute", Total: 10, StartTime: time.Now()},
-			expectedPassed:    2, // 2 passes after correction (1 was adjusted to fail)
-			expectedFailed:    1, // 1 fail
-			expectedCompleted: 3, // Only 3 completed since F doesn't increment completion
-			description:       "Should track pass/fail with corrections for Ginkgo patterns",
+			expectedPassed:    3, // 3 passes (test 1, 2, 4)
+			expectedFailed:    1, // 1 fail (test 3 with [FAILED])
+			expectedCompleted: 4, // All 4 bullet points increment completion
+			description:       "Should track pass/fail correctly for Ginkgo patterns",
 		},
 		{
 			name: "Pytest test progression",
