@@ -159,6 +159,11 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_S
 ```
 **Note:** the value passed to `TEST_SKIPS` should be pipe-separated.
 
+#### Full Suite
+By default, only a small, representative and most robust test cases are selected to run.  
+In order to run all of the available tests, without filtering only to the conformance ones, the ` FULL_SUITE` environment variable can be set to `true`.  
+_Warning_: Using `FULL_SUITE=true` might prolong the checkup run time significantly, and a large amount of test failures/errors are expected.  
+
 #### Storage Class
 In order to set the storage class that will be used throughout the test suites, a `STORAGE_CLASS` environment variable should be specified.
 Example:
