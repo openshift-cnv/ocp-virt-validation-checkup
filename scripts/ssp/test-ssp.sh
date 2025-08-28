@@ -39,10 +39,19 @@ export \
   TEST_EXISTING_CR_NAMESPACE=${SSP_DEPLOYMENT_NAMESPACE} \
   TOPOLOGY_MODE="${CLUSTER_TOPOLOGY}"
 
+
+if [ "${FULL_SUITE}" == "true" ]
+then
+  label_filter=""
+else
+  label_filter="--ginkgo.label-filter=conformance"
+fi
+
 echo "Starting SSP tests 🧪"
 ${SSP_TESTS_BINARY} \
   --ginkgo.junit-report="${ARTIFACTS}/junit.results.xml" \
   --ginkgo.skip='\[QUARANTINE\]' \
+  ${label_filter} \
   --ginkgo.v \
   --ginkgo.no-color \
   ${DRY_RUN_FLAG} \
