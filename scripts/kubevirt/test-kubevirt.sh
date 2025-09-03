@@ -50,13 +50,14 @@ else
   label_filter+=( "(sig-${SIG}&&conformance)" )
 fi
 
-if [ "${SIG}" == "storage" ]
-then
-  label_filter+=( "(StorageCritical)" )
-fi
-
 label_filter_joined=$(printf '%s&&' "${label_filter[@]}")
 label_filter_joined=${label_filter_joined%&&}
+
+if [ "${SIG}" == "storage" ]
+then
+  label_filter_joined="${label_filter_joined}||(StorageCritical)"
+fi
+
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
 # Determine the storage configuration file path

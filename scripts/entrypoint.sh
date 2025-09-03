@@ -240,14 +240,8 @@ fi
 # SSP
 # ====
 if suite_enabled "ssp"; then
-  echo "Setup SSP test suite..."
-  ${SCRIPT_DIR}/ssp/setup-ssp.sh
-
   echo "Running SSP test suite..."
   ${SCRIPT_DIR}/ssp/test-ssp.sh
-
-  echo "SSP test suite has finished. Restoring the environment"
-  ${SCRIPT_DIR}/ssp/teardown-ssp.sh
 else
   echo "SSP test suite has been skipped."
 fi

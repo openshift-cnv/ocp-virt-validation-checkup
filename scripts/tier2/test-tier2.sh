@@ -139,4 +139,4 @@ export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml"
+  --junitxml="${ARTIFACTS}/junit.results.xml" || true

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -ex
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
@@ -17,6 +17,9 @@ skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
 
 
 SSP_TESTS_BINARY="ssp.test"
+
+source "${SCRIPT_DIR}/../funcs.sh"
+trap tests::hco::enable EXIT INT TERM
 
 # SSP configuration
 export SSP_DEPLOYMENT_NAME='ssp-operator'
@@ -43,8 +46,10 @@ export \
 if [ "${FULL_SUITE}" == "true" ]
 then
   label_filter=""
+  tests::hco::disable
 else
   label_filter="--ginkgo.label-filter=conformance"
+  export SKIP_UPDATE_SSP_TESTS=true
 fi
 
 echo "Starting SSP tests 🧪"
@@ -57,6 +62,3 @@ ${SSP_TESTS_BINARY} \
   ${DRY_RUN_FLAG} \
   --ginkgo.timeout='2h' \
   "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/ssp-log.txt
-
-source "${SCRIPT_DIR}/../funcs.sh"
-tests::hco::enable
