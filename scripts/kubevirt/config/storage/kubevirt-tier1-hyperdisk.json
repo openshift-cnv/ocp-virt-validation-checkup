@@ -4,5 +4,6 @@
     "storageRWXBlock":         "sp-balanced-storage",
     "storageRWOFileSystem":    "sp-balanced-storage",
     "storageRWOBlock":         "sp-balanced-storage",
-    "storageSnapshot":         "sp-balanced-storage-rwo"
+    "storageSnapshot":         "sp-balanced-storage-rwo",
+    "storageClassCSI":         "sp-balanced-storage-rwo"
 }

@@ -1,5 +1,6 @@
 {
     "storageClassRhel":        "hostpath-csi-pvc-block",
     "storageClassWindows":     "hostpath-csi-pvc-block",
-    "storageRWOFileSystem":    "hostpath-csi-pvc-block"
+    "storageRWOFileSystem":    "hostpath-csi-pvc-block",
+    "storageClassCSI":         "hostpath-csi-pvc-block"
 }

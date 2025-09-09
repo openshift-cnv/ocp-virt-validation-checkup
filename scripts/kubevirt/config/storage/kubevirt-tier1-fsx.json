@@ -3,5 +3,6 @@
     "storageClassWindows":     "trident-csi-fsx",
     "storageRWXFileSystem":    "trident-csi-fsx",
     "storageRWOFileSystem":    "trident-csi-fsx",
-    "storageSnapshot":         "trident-csi-fsx"
+    "storageSnapshot":         "trident-csi-fsx",
+    "storageClassCSI":         "trident-csi-fsx"
 }
