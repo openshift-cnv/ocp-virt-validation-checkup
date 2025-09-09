@@ -19,6 +19,11 @@ FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 STORAGE_CAPABILITIES=${STORAGE_CAPABILITIES:-""}
 
+# Calculate storage size based on number of test suites (2Gi per suite)
+IFS=',' read -ra TEST_SUITES_ARRAY <<< "${TEST_SUITES}"
+NUM_TEST_SUITES=${#TEST_SUITES_ARRAY[@]}
+STORAGE_SIZE=$((NUM_TEST_SUITES * 2))Gi
+
 ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
@@ -131,7 +136,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
+      storage: ${STORAGE_SIZE}
 EOF
 
 # Job
