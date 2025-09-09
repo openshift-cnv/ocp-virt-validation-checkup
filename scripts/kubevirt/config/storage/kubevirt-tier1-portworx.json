@@ -4,5 +4,6 @@
     "storageRWXFileSystem":    "px-csi-db-shared",
     "storageRWOFileSystem":    "px-csi-db-shared",
     "storageRWOBlock":         "px-csi-db-shared",
-    "storageSnapshot":         "px-csi-db-shared"
+    "storageSnapshot":         "px-csi-db-shared",
+    "storageClassCSI":         "px-csi-db-shared"
 }

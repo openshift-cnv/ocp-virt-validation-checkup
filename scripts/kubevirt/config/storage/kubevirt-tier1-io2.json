@@ -4,5 +4,6 @@
   "storageRWXBlock": "io2-csi",
   "storageRWOFileSystem": "io2-csi",
   "storageRWOBlock": "io2-csi",
-  "storageSnapshot": "io2-csi"
+  "storageSnapshot": "io2-csi",
+  "storageClassCSI": "io2-csi"
 }

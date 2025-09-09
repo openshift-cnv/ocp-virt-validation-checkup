@@ -181,6 +181,7 @@ The syntax of `STORAGE_CAPABILITIES` env var is a comma-separated list of these 
 - storageRWXFileSystem
 - storageRWOFileSystem
 - storageRWOBlock
+- storageClassCSI
 - storageSnapshot
 - onlineResize
 - WFFC

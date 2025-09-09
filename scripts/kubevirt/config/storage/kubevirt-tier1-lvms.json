@@ -3,5 +3,6 @@
     "storageClassWindows":     "lvms-vg1",
     "storageRWOFileSystem":    "lvms-vg1",
     "storageRWOBlock":         "lvms-vg1",
-    "storageSnapshot":         "lvms-vg1"
+    "storageSnapshot":         "lvms-vg1",
+    "storageClassCSI":         "lvms-vg1"
 }

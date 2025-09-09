@@ -4,5 +4,6 @@
     "storageRWXBlock":         "ocs-storagecluster-ceph-rbd-virtualization",
     "storageRWOFileSystem":    "ocs-storagecluster-ceph-rbd-virtualization",
     "storageRWOBlock":         "ocs-storagecluster-ceph-rbd-virtualization",
-    "storageSnapshot":         "ocs-storagecluster-ceph-rbd-virtualization"
+    "storageSnapshot":         "ocs-storagecluster-ceph-rbd-virtualization",
+    "storageClassCSI":         "ocs-storagecluster-ceph-rbd-virtualization"
 }
