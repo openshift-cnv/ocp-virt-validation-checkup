@@ -144,5 +144,5 @@ spec:
   wildcardPolicy: None
   # ---
   # to view the results, visit the route endpoint:
-  # oc get route pvcreader -o jsonpath='{.status.ingress[0].host}'
+  # oc get route pvcreader -n ocp-virt-validation -o jsonpath='{.status.ingress[0].host}'
 EOF

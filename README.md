@@ -75,7 +75,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 10Gi
 ---
 apiVersion: batch/v1
 kind: Job
@@ -133,7 +133,7 @@ By default, the validation checkup will run all of the test suites.
 It is possible to configure a subset of the suites to run. The available test suites are:
 * `compute` - conformance tests with `sig-compute` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository.
 * `network` - conformance tests with `sig-network` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
-* `storage` - conformance tests with `sig-storage` and `StorageCritical` from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
+* `storage` - conformance tests with `sig-storage` label + tests with `StorageCritical` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
 * `ssp` - tests from [ssp-operator](https://github.com/kubevirt/ssp-operator/tree/main/tests) repository.
 * `tier2` - Conformance tests from [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository.
 
@@ -178,6 +178,8 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e STORAG
 ```
 If no `STORAGE_CLASS` environment variable is set, the default storage class in the cluster will be used for the checkup.
 
+**Note:** If the specified storage class is not recognized by the validation checkup and no `STORAGE_CAPABILITIES` are provided, the checkup will fail with an error message: *"The selected storage class was not found and neither STORAGE_CAPABILITIES have been provided"*. In such cases, you must either use a supported storage class or explicitly define the storage capabilities using the `STORAGE_CAPABILITIES` environment variable.
+
 #### Storage Capabilities
 The storage capabilities (such as: volume mode, access mode, snapshot support, etc.) are resolved based on the storage class name, using a predefined list of known storage providers. If the selected storage provider is not known, the `STORAGE_CAPABILITIES` env var must be passed, to instruct the tests what are the storage capabilities that should be put under tests.  
 The syntax of `STORAGE_CAPABILITIES` env var is a comma-separated list of these properties:
@@ -216,6 +218,15 @@ spec:
               value: storageClassRhel,storageRWXFileSystem,storageRWOBlock,onlineResize
 ...
 ```
+
+**Note:** If the provisioner is recognized by [CDI](https://github.com/kubevirt/containerized-data-importer), it is possible to get the the supported access mode and volume mode for a given Storage Class by checking its StorageProfile, e.g.
+```
+$ oc get storageprofile my-custom-sc -o yaml | yq .status.claimPropertySets
+- accessModes:
+    - ReadWriteMany
+  volumeMode: Filesystem
+```
+In this case, `storageRWXFileSystem` should be set.
 
 #### Dry Run
 In order to see which tests are going to be run, without actually executing them on the cluster, a `DRY_RUN` environment variable can be set:
@@ -408,7 +419,7 @@ spec:
   wildcardPolicy: None
   # ---
   # to view the results, visit the route endpoint:
-  # oc get route pvcreader -o jsonpath='{.status.ingress[0].host}'
+  # oc get route pvcreader -n ocp-virt-validation -o jsonpath='{.status.ingress[0].host}'
 ```
 **Note:** You can apply the manifests directly from the command, using:
 ```bash
@@ -420,7 +431,7 @@ route.route.openshift.io/pvcreader created
 ```
 The Route leading to the nginx server hosting the detailed results will be available at:  
 ```bash
-$ oc get route pvcreader -o jsonpath='{.status.ingress[0].host}'
+$ oc get route pvcreader -n ocp-virt-validation -o jsonpath='{.status.ingress[0].host}'
 ```
 The nginx server hosts a file directory, containing a directory for every executed test suite.  
 For each subdirectory (compute, network, storage, ssp), there are:

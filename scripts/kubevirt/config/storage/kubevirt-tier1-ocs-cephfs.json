@@ -1,0 +1,7 @@
+{
+    "storageClassRhel":        "ocs-storagecluster-cephfs",
+    "storageClassWindows":     "ocs-storagecluster-cephfs",
+    "storageRWXFileSystem":    "ocs-storagecluster-cephfs",
+    "storageSnapshot":         "ocs-storagecluster-cephfs",
+    "storageClassCSI":         "ocs-storagecluster-cephfs"
+}
