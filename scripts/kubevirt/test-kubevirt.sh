@@ -7,7 +7,6 @@ function escape() {
 }
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-KUBEVIRT_TESTING_CONFIGURATION_FILE=${KUBEVIRT_TESTING_CONFIGURATION_FILE:-'kubevirt-testing-configuration.json'}
 readonly TARGET_NAMESPACE="openshift-cnv"
 
 skip_tests+=('\[QUARANTINE\]')
@@ -71,12 +70,22 @@ if [ -n "${KUBEVIRT_STORAGE_CONFIGURATION_FILE}" ]; then
     STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/storage/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
     echo "Using predefined storage configuration: ${STORAGE_CONFIG_PATH}"
   else
-    echo "Warning: Storage configuration file not found: ${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
-    STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/storage/${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+    echo "Error: Storage configuration file not found: ${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
+    echo "The selected storage class was not found and neither STORAGE_CAPABILITIES have been provided"
+    exit 1
+  fi
+elif [ -n "${KUBEVIRT_TESTING_CONFIGURATION_FILE}" ]; then
+  # Use fallback configuration if specified
+  STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/${KUBEVIRT_TESTING_CONFIGURATION_FILE}"
+  if [ ! -f "${STORAGE_CONFIG_PATH}" ]; then
+    echo "Error: Storage configuration file not found: ${KUBEVIRT_TESTING_CONFIGURATION_FILE}"
+    echo "The selected storage class was not found and neither STORAGE_CAPABILITIES have been provided"
+    exit 1
   fi
 else
-  # Use default configuration path if no storage config specified
-  STORAGE_CONFIG_PATH="${SCRIPT_DIR}/config/${KUBEVIRT_TESTING_CONFIGURATION_FILE}"
+  echo "Error: No storage configuration provided"
+  echo "The selected storage class was not found and neither STORAGE_CAPABILITIES have been provided"
+  exit 1
 fi
 
 echo "Starting ${SIG} tests 🧪"
