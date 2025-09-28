@@ -36,7 +36,9 @@ func New(junitResults map[string]junit.TestSuite) Result {
 			}
 		}
 
-		passed := testSuite.Tests - testSuite.Failures
+		// Count both failures and errors as failures
+		totalFailures := testSuite.Failures + testSuite.Errors
+		passed := testSuite.Tests - totalFailures
 		if sig == "ssp" {
 			passed -= skipped
 		}
@@ -44,11 +46,11 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		sigRes := Sig{
 			Run:      testSuite.Tests,
 			Passed:   passed,
-			Failures: testSuite.Failures,
+			Failures: totalFailures,
 			Skipped:  skipped,
 		}
 
-		if testSuite.Failures > 0 {
+		if totalFailures > 0 {
 			var failedTests []string
 			for _, testCase := range testSuite.TestCases {
 				if testCase.Failure || testCase.Error {
@@ -62,7 +64,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		res.SigMap[sig] = sigRes
 		res.Summary.Run += testSuite.Tests
 		res.Summary.Passed += passed
-		res.Summary.Failed += testSuite.Failures
+		res.Summary.Failed += totalFailures
 		res.Summary.Skipped += skipped
 	}
 

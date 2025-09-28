@@ -14,6 +14,7 @@ type TestSuite struct {
 	Name      string     `xml:"name,attr"`
 	Tests     int        `xml:"tests,attr"`
 	Failures  int        `xml:"failures,attr"`
+	Errors    int        `xml:"errors,attr"`
 	Skipped   int        `xml:"skipped,attr"`
 	Disabled  int        `xml:"disabled,attr"`
 	TestCases []TestCase `xml:"testcase"`
