@@ -24,7 +24,18 @@ func New(junitResults map[string]junit.TestSuite) Result {
 	}
 
 	for sig, testSuite := range junitResults {
+		// Count skipped tests from testsuite header OR individual test cases
 		skipped := testSuite.Skipped + testSuite.Disabled
+
+		// If testsuite header doesn't have skipped count, count individual skipped test cases
+		if skipped == 0 {
+			for _, testCase := range testSuite.TestCases {
+				if testCase.Skipped {
+					skipped++
+				}
+			}
+		}
+
 		passed := testSuite.Tests - testSuite.Failures
 		if sig == "ssp" {
 			passed -= skipped
@@ -52,6 +63,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		res.Summary.Run += testSuite.Tests
 		res.Summary.Passed += passed
 		res.Summary.Failed += testSuite.Failures
+		res.Summary.Skipped += skipped
 	}
 
 	return res
@@ -70,9 +82,10 @@ type Sig struct {
 }
 
 type Summary struct {
-	Run    int `json:"total_tests_run"`
-	Passed int `json:"total_tests_passed"`
-	Failed int `json:"total_tests_failed"`
+	Run     int `json:"total_tests_run"`
+	Passed  int `json:"total_tests_passed"`
+	Failed  int `json:"total_tests_failed"`
+	Skipped int `json:"total_tests_skipped"`
 }
 
 // MarshalJSON implements the json.Marshaler interface for Result, to make the SigMap's Sigs field inline in the
@@ -137,6 +150,7 @@ func (r Result) String() string {
 	sb.WriteString(fmt.Sprintf("Total Tests Run: %d\n", r.Summary.Run))
 	sb.WriteString(fmt.Sprintf("Total Tests Passed: %d\n", r.Summary.Passed))
 	sb.WriteString(fmt.Sprintf("Total Tests Failed: %d\n", r.Summary.Failed))
+	sb.WriteString(fmt.Sprintf("Total Tests Skipped: %d\n", r.Summary.Skipped))
 
 	return sb.String()
 }
