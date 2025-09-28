@@ -45,10 +45,8 @@ export \
 
 if [ "${FULL_SUITE}" == "true" ]
 then
-  label_filter=""
   tests::hco::disable
 else
-  label_filter="--ginkgo.label-filter=conformance"
   export SKIP_UPDATE_SSP_TESTS=true
 fi
 
@@ -56,7 +54,6 @@ echo "Starting SSP tests 🧪"
 ${SSP_TESTS_BINARY} \
   --ginkgo.junit-report="${ARTIFACTS}/junit.results.xml" \
   --ginkgo.skip='\[QUARANTINE\]' \
-  ${label_filter} \
   --ginkgo.v \
   --ginkgo.no-color \
   ${DRY_RUN_FLAG} \
