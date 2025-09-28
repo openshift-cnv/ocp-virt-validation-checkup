@@ -76,6 +76,9 @@ func TestHandlesEmptyJUnitResults(t *testing.T) {
 	if res.Summary.Failed != 0 {
 		t.Errorf("expected 0 total tests failed, got %d", res.Summary.Failed)
 	}
+	if res.Summary.Skipped != 0 {
+		t.Errorf("expected 0 total tests skipped, got %d", res.Summary.Skipped)
+	}
 }
 
 func TestHandlesSpecialSigLogicForSSP(t *testing.T) {
@@ -121,7 +124,7 @@ func TestMarshalsResultToJSONCorrectly(t *testing.T) {
 		t.Fatalf("unexpected error marshaling result to JSON: %v", err)
 	}
 
-	expected := `{"sig1":{"tests_run":2,"tests_passed":1,"tests_failures":1,"tests_skipped":0,"failed_tests":["test1"]},"summary":{"total_tests_run":2,"total_tests_passed":1,"total_tests_failed":1}}`
+	expected := `{"sig1":{"tests_run":2,"tests_passed":1,"tests_failures":1,"tests_skipped":0,"failed_tests":["test1"]},"summary":{"total_tests_run":2,"total_tests_passed":1,"total_tests_failed":1,"total_tests_skipped":0}}`
 	if string(jsonData) != expected {
 		t.Errorf("expected JSON %s, got %s", expected, string(jsonData))
 	}
@@ -157,6 +160,7 @@ summary:
   total_tests_failed: 1
   total_tests_passed: 1
   total_tests_run: 2
+  total_tests_skipped: 0
 `
 
 	if string(yamlData) != expected {
