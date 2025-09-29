@@ -19,12 +19,12 @@ FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 STORAGE_CAPABILITIES=${STORAGE_CAPABILITIES:-""}
 
-# Calculate storage size based on test suites (2Gi per suite, 4Gi for tier2)
+# Calculate storage size based on test suites (2Gi per suite, 10Gi for tier2)
 IFS=',' read -ra TEST_SUITES_ARRAY <<< "${TEST_SUITES}"
 TOTAL_STORAGE=0
 for suite in "${TEST_SUITES_ARRAY[@]}"; do
   if [[ "$suite" == "tier2" ]]; then
-    TOTAL_STORAGE=$((TOTAL_STORAGE + 4))
+    TOTAL_STORAGE=$((TOTAL_STORAGE + 10))
   else
     TOTAL_STORAGE=$((TOTAL_STORAGE + 2))
   fi
