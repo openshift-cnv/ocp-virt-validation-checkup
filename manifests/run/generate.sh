@@ -19,10 +19,17 @@ FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 STORAGE_CAPABILITIES=${STORAGE_CAPABILITIES:-""}
 
-# Calculate storage size based on number of test suites (2Gi per suite)
+# Calculate storage size based on test suites (2Gi per suite, 4Gi for tier2)
 IFS=',' read -ra TEST_SUITES_ARRAY <<< "${TEST_SUITES}"
-NUM_TEST_SUITES=${#TEST_SUITES_ARRAY[@]}
-STORAGE_SIZE=$((NUM_TEST_SUITES * 2))Gi
+TOTAL_STORAGE=0
+for suite in "${TEST_SUITES_ARRAY[@]}"; do
+  if [[ "$suite" == "tier2" ]]; then
+    TOTAL_STORAGE=$((TOTAL_STORAGE + 4))
+  else
+    TOTAL_STORAGE=$((TOTAL_STORAGE + 2))
+  fi
+done
+STORAGE_SIZE="${TOTAL_STORAGE}Gi"
 
 ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
