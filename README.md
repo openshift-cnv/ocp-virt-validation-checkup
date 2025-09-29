@@ -228,6 +228,8 @@ $ oc get storageprofile my-custom-sc -o yaml | yq .status.claimPropertySets
 ```
 In this case, `storageRWXFileSystem` should be set.
 
+**Note** If the `storageSnapshot` storage capability is not passed, tests that are requiring snapshots will fail with error. The snapshot tests are not skipped because they are a core functionality of OpenShift Virtualization.
+
 #### Dry Run
 In order to see which tests are going to be run, without actually executing them on the cluster, a `DRY_RUN` environment variable can be set:
 ```bash
