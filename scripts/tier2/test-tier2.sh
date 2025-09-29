@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -e
 
 cd /openshift-virtualization-tests
 oc image extract ghcr.io/astral-sh/uv:latest --file /uv,/uvx
