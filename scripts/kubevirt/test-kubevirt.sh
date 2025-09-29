@@ -57,8 +57,6 @@ then
   label_filter_joined="${label_filter_joined}||(StorageCritical)"
 fi
 
-label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
-
 # Determine the storage configuration file path
 STORAGE_CONFIG_PATH=""
 if [ -n "${KUBEVIRT_STORAGE_CONFIGURATION_FILE}" ]; then
@@ -87,6 +85,17 @@ else
   echo "The selected storage class was not found and neither STORAGE_CAPABILITIES have been provided"
   exit 1
 fi
+
+# Check storage configuration and modify label filter if block storage is not supported
+if [ -f "${STORAGE_CONFIG_PATH}" ]; then
+  # Check if both storageRWOBlock and storageRWXBlock are missing from the config
+  if ! grep -q '"storageRWOBlock"' "${STORAGE_CONFIG_PATH}" && ! grep -q '"storageRWXBlock"' "${STORAGE_CONFIG_PATH}"; then
+    label_filter_joined="${label_filter_joined}&&(!RequiresBlockStorage)"
+    echo "Block storage not supported, added (!RequiresBlockStorage) filter"
+  fi
+fi
+
+label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
 echo "Starting ${SIG} tests 🧪"
 ${TESTS_BINARY} \
