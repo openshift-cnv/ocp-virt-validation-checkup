@@ -108,10 +108,11 @@ ${TESTS_BINARY} \
     ${GINKGO_SLOW} \
     --ginkgo.v \
     --ginkgo.no-color \
+    --ginkgo.timeout=7h \
+    -test.timeout=7h \
     -kubectl-path=/usr/bin/oc \
     -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
     -utility-container-prefix=quay.io/kubevirt \
-    -test.timeout=7h \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
