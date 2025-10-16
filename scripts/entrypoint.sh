@@ -110,7 +110,15 @@ if [ -n "${STORAGE_CLASS}" ]; then
   if [ -z "${STORAGE_CONFIG_FILE}" ]; then
     echo "Warning: No storage configuration file found for storage class '${STORAGE_CLASS}'"
     echo "Available storage configurations:"
-    ls "${SCRIPT_DIR}/kubevirt/config/storage"/*.json 2>/dev/null | xargs -n1 basename | sed 's/\.json$//' || echo "  None found"
+    {
+      for config_file in "${SCRIPT_DIR}/kubevirt/config/storage"/*.json; do
+        if [ -f "$config_file" ]; then
+          # Extract the first value from the JSON file (all values are the same)
+          storage_class_value=$(jq -r '. as $obj | [$obj[]] | .[0]' "$config_file" 2>/dev/null)
+          echo "${storage_class_value}"
+        fi
+      done
+    } | sort -u | sed 's/^/  /' || echo "  None found"
   fi
 else
   echo "Warning: No storage class specified or detected"
