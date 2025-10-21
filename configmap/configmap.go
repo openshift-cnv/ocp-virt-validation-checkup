@@ -15,9 +15,15 @@ const (
 )
 
 func New(cfg config.Config, result []byte) (*corev1.ConfigMap, error) {
+	// Get namespace from environment variable with default fallback
+	namespace := os.Getenv("CONFIGMAP_NAMESPACE")
+	if namespace == "" {
+		namespace = appName
+	}
+
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: appName,
+			Namespace: namespace,
 			Labels: map[string]string{
 				"app": appName,
 			},
@@ -29,11 +35,20 @@ func New(cfg config.Config, result []byte) (*corev1.ConfigMap, error) {
 		},
 	}
 
+	// Get configmap name from environment variable with default fallback
+	configMapName := os.Getenv("CONFIGMAP_NAME")
 	ts := os.Getenv("TIMESTAMP")
-	if ts == "" {
-		cm.ObjectMeta.GenerateName = cmNamePrefix
+
+	if configMapName != "" {
+		// Use custom configmap name
+		cm.ObjectMeta.Name = configMapName
 	} else {
-		cm.ObjectMeta.Name = cmNamePrefix + ts
+		// Use default naming logic
+		if ts == "" {
+			cm.ObjectMeta.GenerateName = cmNamePrefix
+		} else {
+			cm.ObjectMeta.Name = cmNamePrefix + ts
+		}
 	}
 
 	return cm, nil

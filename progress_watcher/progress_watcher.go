@@ -826,8 +826,9 @@ func hasProgressChanged(currentState *ProgressState) bool {
 			previousSuite.Passed != currentSuite.Passed ||
 			previousSuite.Failed != currentSuite.Failed ||
 			previousSuite.Percent != currentSuite.Percent ||
-			previousSuite.Finished != currentSuite.Finished ||
-			previousSuite.Duration != currentSuite.Duration {
+			previousSuite.Finished != currentSuite.Finished {
+			// Note: Duration is intentionally excluded from change detection
+			// to prevent hot-looping on time updates alone
 			return true
 		}
 	}
@@ -886,11 +887,15 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = fmt.Sprintf("%d", suitePercent)
 		annotations[fmt.Sprintf("test-progress/%s-finished", suite.Name)] = fmt.Sprintf("%t", suite.Finished)
 
-		// Only add duration annotation when suite has finished
+		// Add duration annotation for both running and finished suites
+		var suiteDuration time.Duration
 		if suite.Finished && !suite.EndTime.IsZero() {
-			suiteDuration := suite.EndTime.Sub(suite.StartTime)
-			annotations[fmt.Sprintf("test-progress/%s-duration", suite.Name)] = suiteDuration.String()
+			suiteDuration = suite.EndTime.Sub(suite.StartTime)
+		} else {
+			// For running suites, calculate current duration
+			suiteDuration = time.Since(suite.StartTime)
 		}
+		annotations[fmt.Sprintf("test-progress/%s-duration", suite.Name)] = suiteDuration.String()
 	}
 
 	// Add pre-discovered totals for suites that haven't started yet
@@ -907,7 +912,7 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 			annotations[fmt.Sprintf("test-progress/%s-failed", suiteName)] = "0"
 			annotations[fmt.Sprintf("test-progress/%s-percent", suiteName)] = "0"
 			annotations[fmt.Sprintf("test-progress/%s-finished", suiteName)] = "false"
-			// Duration annotation only added when suite finishes
+			// Duration annotation not added for not-yet-started suites
 		}
 	}
 
@@ -938,9 +943,12 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		}
 
 		var suiteDuration time.Duration
-		// Only track duration for change detection if suite has finished
+		// Track duration for change detection for both running and finished suites
 		if suite.Finished && !suite.EndTime.IsZero() {
 			suiteDuration = suite.EndTime.Sub(suite.StartTime)
+		} else {
+			// For running suites, calculate current duration
+			suiteDuration = time.Since(suite.StartTime)
 		}
 
 		currentState.SuiteProgress[suite.Name] = SuiteState{
