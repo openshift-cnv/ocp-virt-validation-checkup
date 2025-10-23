@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -43,11 +44,21 @@ func New(junitResults map[string]junit.TestSuite) Result {
 			passed -= skipped
 		}
 
+		// Convert time from seconds to duration string format (rounded to whole seconds)
+		var durationStr string
+		if testSuite.Time > 0 {
+			// Round to nearest second
+			roundedSeconds := int64(testSuite.Time + 0.5)
+			duration := time.Duration(roundedSeconds) * time.Second
+			durationStr = duration.String()
+		}
+
 		sigRes := Sig{
 			Run:      testSuite.Tests,
 			Passed:   passed,
 			Failures: totalFailures,
 			Skipped:  skipped,
+			Duration: durationStr,
 		}
 
 		if totalFailures > 0 {
@@ -80,6 +91,7 @@ type Sig struct {
 	Passed      int      `json:"tests_passed"`
 	Failures    int      `json:"tests_failures"`
 	Skipped     int      `json:"tests_skipped"`
+	Duration    string   `json:"tests_duration,omitempty"`
 	FailedTests []string `json:"failed_tests,omitempty"`
 }
 
@@ -135,6 +147,9 @@ func (r Result) String() string {
 		sb.WriteString(fmt.Sprintf("Tests Passed: %d\n", sigRes.Passed))
 		sb.WriteString(fmt.Sprintf("Tests Failed: %d\n", sigRes.Failures))
 		sb.WriteString(fmt.Sprintf("Tests Skipped: %d\n", sigRes.Skipped))
+		if sigRes.Duration != "" {
+			sb.WriteString(fmt.Sprintf("Tests Duration: %s\n", sigRes.Duration))
+		}
 
 		if len(sigRes.FailedTests) > 0 {
 			sb.WriteString("Failed Tests:\n")
