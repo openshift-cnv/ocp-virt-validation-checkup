@@ -319,3 +319,10 @@ create_kubeconfig() {
   export KUBECONFIG=$(pwd)/${KUBECONFIG_FILE}
 }
 
+get_virtctl() {
+  VIRTCTL_URL=$(oc get consoleclidownloads virtctl-clidownloads-kubevirt-hyperconverged -o json | jq -r '.spec.links[] | select(.text |contains("Linux for x86_64")) | .href')
+  curl -kL -o virtctl.tar.gz ${VIRTCTL_URL}
+  tar -xzf virtctl.tar.gz
+  rm virtctl.tar.gz
+  echo "virtctl downloaded"
+}
