@@ -6,6 +6,63 @@ function escape() {
     echo "$1" | sed -E 's/([][()| ])/\\\1/g'
 }
 
+# Global variable to track if disk-images-provider was applied
+DISK_IMAGES_PROVIDER_APPLIED=false
+
+function apply_disk_images_provider() {
+    if [ -z "${KUBEVIRT_RELEASE}" ]; then
+        echo "Warning: KUBEVIRT_RELEASE not set, skipping disk-images-provider deployment"
+        return 0
+    fi
+    
+    local yaml_file="${SCRIPT_DIR}/testing-infra/disk-images-provider.yaml"
+    if [ ! -f "${yaml_file}" ]; then
+        echo "Warning: disk-images-provider.yaml not found at ${yaml_file}"
+        return 0
+    fi
+    
+    echo "Applying disk-images-provider with KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE}"
+    
+    # Replace the image tag with KUBEVIRT_RELEASE and apply
+    sed "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g" "${yaml_file}" | \
+        oc apply -f -
+    
+    if [ $? -eq 0 ]; then
+        DISK_IMAGES_PROVIDER_APPLIED=true
+        echo "disk-images-provider applied successfully"
+        
+        # Wait for the DaemonSet to be ready
+        echo "Waiting for disk-images-provider DaemonSet to be ready..."
+        oc rollout status daemonset/disks-images-provider -n openshift-cnv --timeout=300s
+    else
+        echo "Failed to apply disk-images-provider"
+        return 1
+    fi
+}
+
+function cleanup_disk_images_provider() {
+    if [ "${DISK_IMAGES_PROVIDER_APPLIED}" = "true" ]; then
+        echo "Cleaning up disk-images-provider resources..."
+        local yaml_file="${SCRIPT_DIR}/testing-infra/disk-images-provider.yaml"
+        if [ -f "${yaml_file}" ]; then
+            # Use the same substitution and delete
+            sed "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g" "${yaml_file}" | \
+                oc delete -f - --ignore-not-found=true
+            echo "disk-images-provider resources deleted"
+        fi
+        DISK_IMAGES_PROVIDER_APPLIED=false
+    fi
+}
+
+function cleanup_and_exit() {
+    echo "Script interrupted, cleaning up..."
+    cleanup_disk_images_provider
+    exit 1
+}
+
+# Set up signal traps for cleanup
+trap cleanup_and_exit SIGINT SIGTERM
+
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 readonly TARGET_NAMESPACE="openshift-cnv"
 
@@ -97,6 +154,11 @@ fi
 
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
+# Apply disk-images-provider if running storage tests
+if [ "${SIG}" == "storage" ]; then
+    apply_disk_images_provider
+fi
+
 echo "Starting ${SIG} tests 🧪"
 ${TESTS_BINARY} \
     -cdi-namespace="$TARGET_NAMESPACE" \
@@ -111,9 +173,13 @@ ${TESTS_BINARY} \
     --ginkgo.timeout=7h \
     -test.timeout=7h \
     -kubectl-path=/usr/bin/oc \
+    -virtctl-path=/home/ocp-virt-validation-checkup/virtctl \
     -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
     -utility-container-prefix=quay.io/kubevirt \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
     "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt
+
+# Cleanup disk-images-provider resources if they were applied
+cleanup_disk_images_provider
