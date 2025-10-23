@@ -14,6 +14,7 @@ fi
 export DRY_RUN_FLAG
 
 create_kubeconfig
+get_virtctl
 
 REGISTRY_CONFIG=$(mktemp)
 oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${REGISTRY_CONFIG}"
