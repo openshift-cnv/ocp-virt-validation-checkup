@@ -43,6 +43,8 @@ var (
 	previousProgress *ProgressState
 	// Pre-discovered test totals from dry-run
 	preDiscoveredTotals map[string]int
+	// Last update timestamp for rate limiting
+	lastUpdateTime time.Time
 )
 
 // TestSuite represents a single test suite being monitored
@@ -836,6 +838,21 @@ func hasProgressChanged(currentState *ProgressState) bool {
 	return false
 }
 
+// shouldUpdateJob determines if the job should be updated based on progress changes or time elapsed
+func shouldUpdateJob(currentState *ProgressState) bool {
+	// Always update if there are meaningful progress changes
+	if hasProgressChanged(currentState) {
+		return true
+	}
+
+	// Update if 30 seconds have passed since last update
+	if time.Since(lastUpdateTime) >= 30*time.Second {
+		return true
+	}
+
+	return false
+}
+
 // updateJobAnnotations calculates overall progress and updates the Job annotations
 func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) error {
 	ctx := context.TODO()
@@ -887,7 +904,7 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		annotations[fmt.Sprintf("test-progress/%s-percent", suite.Name)] = fmt.Sprintf("%d", suitePercent)
 		annotations[fmt.Sprintf("test-progress/%s-finished", suite.Name)] = fmt.Sprintf("%t", suite.Finished)
 
-		// Add duration annotation for both running and finished suites
+		// Add duration annotation for both running and finished suites (rounded to whole seconds)
 		var suiteDuration time.Duration
 		if suite.Finished && !suite.EndTime.IsZero() {
 			suiteDuration = suite.EndTime.Sub(suite.StartTime)
@@ -895,7 +912,9 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 			// For running suites, calculate current duration
 			suiteDuration = time.Since(suite.StartTime)
 		}
-		annotations[fmt.Sprintf("test-progress/%s-duration", suite.Name)] = suiteDuration.String()
+		// Round to nearest second
+		roundedDuration := suiteDuration.Round(time.Second)
+		annotations[fmt.Sprintf("test-progress/%s-duration", suite.Name)] = roundedDuration.String()
 	}
 
 	// Add pre-discovered totals for suites that haven't started yet
@@ -943,13 +962,15 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		}
 
 		var suiteDuration time.Duration
-		// Track duration for change detection for both running and finished suites
+		// Track duration for change detection for both running and finished suites (rounded to whole seconds)
 		if suite.Finished && !suite.EndTime.IsZero() {
 			suiteDuration = suite.EndTime.Sub(suite.StartTime)
 		} else {
 			// For running suites, calculate current duration
 			suiteDuration = time.Since(suite.StartTime)
 		}
+		// Round to nearest second for consistency
+		suiteDuration = suiteDuration.Round(time.Second)
 
 		currentState.SuiteProgress[suite.Name] = SuiteState{
 			Total:     suite.Total,
@@ -962,8 +983,13 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 		}
 	}
 
-	// Check if progress has changed
-	progressChanged := hasProgressChanged(currentState)
+	// Check if we should update the job (meaningful changes or 30 seconds elapsed)
+	shouldUpdate := shouldUpdateJob(currentState)
+
+	if !shouldUpdate {
+		// Skip update - no meaningful changes and not enough time elapsed
+		return nil
+	}
 
 	// Store overall data as annotations
 	annotations["test-progress/total"] = fmt.Sprintf("%d", overallTotal)
@@ -973,12 +999,12 @@ func updateJobAnnotations(clientset *kubernetes.Clientset, suites []*TestSuite) 
 	annotations["test-progress/percent"] = fmt.Sprintf("%d", overallPercent)
 	annotations["test-progress/active-suites"] = fmt.Sprintf("%d", len(suites))
 
-	// Only update last-updated if progress has actually changed
-	if progressChanged {
-		annotations["test-progress/last-updated"] = time.Now().UTC().Format(time.RFC3339)
-		// Update the global previous progress state
-		previousProgress = currentState
-	}
+	// Always update last-updated when we do update
+	annotations["test-progress/last-updated"] = time.Now().UTC().Format(time.RFC3339)
+
+	// Update the global previous progress state and last update time
+	previousProgress = currentState
+	lastUpdateTime = time.Now()
 
 	// Update job annotations
 	if job.Annotations == nil {
