@@ -80,15 +80,27 @@ func TestPytestRegex(t *testing.T) {
 		matches  bool
 	}{
 		{
-			name:     "Valid pytest collected count",
+			name:     "Valid pytest collected count with deselected",
+			input:    "collected 2179 items / 2004 deselected / 175 selected",
+			expected: "175",
+			matches:  true,
+		},
+		{
+			name:     "Valid pytest collected count simple",
 			input:    "collected 42 items",
 			expected: "42",
 			matches:  true,
 		},
 		{
-			name:     "Different number",
+			name:     "Different number simple",
 			input:    "collected 123 items",
 			expected: "123",
+			matches:  true,
+		},
+		{
+			name:     "Different number with deselected",
+			input:    "collected 500 items / 100 deselected / 400 selected",
+			expected: "400",
 			matches:  true,
 		},
 		{
@@ -107,7 +119,12 @@ func TestPytestRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Try complex regex first, then simple
 			matches := pytestRegex.FindStringSubmatch(tt.input)
+			if len(matches) == 0 {
+				matches = pytestRegexSimple.FindStringSubmatch(tt.input)
+			}
+
 			if tt.matches {
 				if len(matches) < 2 {
 					t.Errorf("Expected match but got none for input: %s", tt.input)
@@ -266,7 +283,7 @@ func TestProcessSuiteLine(t *testing.T) {
 				Total:     10,
 				Completed: 3,
 			},
-			line:              "TEST: something PASSED",
+			line:              "TEST: something STATUS: PASSED",
 			expectedTotal:     10,
 			expectedCompleted: 4,
 			expectedPassed:    1,
@@ -279,9 +296,22 @@ func TestProcessSuiteLine(t *testing.T) {
 				Total:     10,
 				Completed: 7,
 			},
-			line:              "TEST: another FAILED",
+			line:              "TEST: another STATUS: FAILED",
 			expectedTotal:     10,
 			expectedCompleted: 8,
+			expectedPassed:    0,
+			expectedFailed:    1,
+		},
+		{
+			name: "Pytest test error",
+			suite: &TestSuite{
+				Name:      "tier2",
+				Total:     10,
+				Completed: 5,
+			},
+			line:              "TEST: error_test STATUS: ERROR",
+			expectedTotal:     10,
+			expectedCompleted: 6,
 			expectedPassed:    0,
 			expectedFailed:    1,
 		},
@@ -355,15 +385,28 @@ func TestPassFailCounting(t *testing.T) {
 		{
 			name: "Pytest test progression",
 			inputLines: []string{
-				"TEST: test_vm_creation PASSED",
-				"TEST: test_vm_deletion FAILED",
-				"TEST: test_vm_migration PASSED",
+				"TEST: test_vm_creation STATUS: PASSED",
+				"TEST: test_vm_deletion STATUS: FAILED",
+				"TEST: test_vm_migration STATUS: PASSED",
 			},
 			initialSuite:      TestSuite{Name: "tier2", Total: 10, StartTime: time.Now()},
 			expectedPassed:    2,
 			expectedFailed:    1,
 			expectedCompleted: 3,
 			description:       "Should track pytest pass/fail correctly",
+		},
+		{
+			name: "Pytest test with errors",
+			inputLines: []string{
+				"TEST: test_vm_creation STATUS: PASSED",
+				"TEST: test_vm_deletion STATUS: ERROR",
+				"TEST: test_vm_migration STATUS: FAILED",
+			},
+			initialSuite:      TestSuite{Name: "tier2", Total: 10, StartTime: time.Now()},
+			expectedPassed:    1,
+			expectedFailed:    2, // ERROR counts as failure
+			expectedCompleted: 3,
+			description:       "Should count ERROR as failure",
 		},
 		{
 			name: "Summary line updates",
