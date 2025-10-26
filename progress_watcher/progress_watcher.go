@@ -34,8 +34,11 @@ var (
 
 var (
 	specRegex = regexp.MustCompile(`Will run (\d+) of \d+ specs`)
-	// For pytest (tier2 tests) - matches collected test count
-	pytestRegex = regexp.MustCompile(`collected (\d+) items`)
+	// For pytest (tier2 tests) - matches selected test count (excluding deselected/skipped)
+	// Format: "collected X items / Y deselected / Z selected"
+	pytestRegex = regexp.MustCompile(`collected \d+ items / \d+ deselected / (\d+) selected`)
+	// Fallback for when there are no deselected tests: "collected X items"
+	pytestRegexSimple = regexp.MustCompile(`collected (\d+) items$`)
 	// Global logger for progress output
 	logger  *log.Logger
 	logFile *os.File
@@ -568,8 +571,16 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 			}
 		}
 
-		// Try pytest pattern (for tier2)
+		// Try pytest pattern with selected count (for tier2)
 		if match := pytestRegex.FindStringSubmatch(line); match != nil {
+			var count int
+			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				return count
+			}
+		}
+
+		// Try simple pytest pattern as fallback (when no deselected tests)
+		if match := pytestRegexSimple.FindStringSubmatch(line); match != nil {
 			var count int
 			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
 				return count
@@ -602,8 +613,14 @@ func processSuiteLine(suite *TestSuite, line string) {
 			fmt.Sscanf(match[1], "%d", &suite.Total)
 			return
 		}
-		// Check for pytest total (tier2)
+		// Check for pytest total with selected count (tier2)
 		if match := pytestRegex.FindStringSubmatch(line); match != nil {
+			logger.Printf("[%s] Detected total pytest selected items: %s\n", suite.Name, match[1])
+			fmt.Sscanf(match[1], "%d", &suite.Total)
+			return
+		}
+		// Check for simple pytest total as fallback (when no deselected tests)
+		if match := pytestRegexSimple.FindStringSubmatch(line); match != nil {
 			logger.Printf("[%s] Detected total pytest items: %s\n", suite.Name, match[1])
 			fmt.Sscanf(match[1], "%d", &suite.Total)
 			return
@@ -620,6 +637,15 @@ func processSuiteLine(suite *TestSuite, line string) {
 			return
 		}
 		if match := pytestRegex.FindStringSubmatch(line); match != nil {
+			var detectedTotal int
+			fmt.Sscanf(match[1], "%d", &detectedTotal)
+			if detectedTotal != suite.Total {
+				logger.Printf("[%s] Warning: detected total (%d) differs from pre-discovered total (%d)\n",
+					suite.Name, detectedTotal, suite.Total)
+			}
+			return
+		}
+		if match := pytestRegexSimple.FindStringSubmatch(line); match != nil {
 			var detectedTotal int
 			fmt.Sscanf(match[1], "%d", &detectedTotal)
 			if detectedTotal != suite.Total {
@@ -691,13 +717,14 @@ func processSuiteLine(suite *TestSuite, line string) {
 				suite.EndTime = time.Now()
 				logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 			}
-		} else if strings.Contains(line, "PASSED") || strings.Contains(line, "FAILED") {
+		} else if strings.Contains(line, "PASSED") || strings.Contains(line, "FAILED") || strings.Contains(line, "ERROR") {
 			// Pytest test completion patterns
-			if strings.HasPrefix(line, "TEST:") {
+			if strings.HasPrefix(line, "TEST:") && strings.Contains(line, "STATUS:") {
 				suite.Completed++
 				if strings.Contains(line, "PASSED") {
 					suite.Passed++
-				} else if strings.Contains(line, "FAILED") {
+				} else if strings.Contains(line, "FAILED") || strings.Contains(line, "ERROR") {
+					// Count both FAILED and ERROR as failures
 					suite.Failed++
 				}
 				logger.Printf("[%s] Completed: %d/%d (passed: %d, failed: %d)\n",

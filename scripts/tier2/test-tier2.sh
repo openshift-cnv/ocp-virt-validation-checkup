@@ -128,6 +128,7 @@ fi
 
 export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
 
+echo "Starting tier2 tests 🧪"
 ./uv run pytest \
   -m "conformance" \
   --skip-artifactory-check \
@@ -139,4 +140,4 @@ export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml" || true
+  --junitxml="${ARTIFACTS}/junit.results.xml" 2>&1 | tee ${ARTIFACTS}/tier2-log.txt || true
