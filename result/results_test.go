@@ -34,11 +34,11 @@ func TestCreatesResultWithValidJUnitResults(t *testing.T) {
 	}
 
 	sig1 := res.SigMap["sig1"]
-	if sig1.Run != 5 {
-		t.Errorf("expected 5 tests run for sig1, got %d", sig1.Run)
+	if sig1.Run != 4 {
+		t.Errorf("expected 4 tests run for sig1 (5 total - 1 skipped), got %d", sig1.Run)
 	}
-	if sig1.Passed != 4 {
-		t.Errorf("expected 3 tests passed for sig1, got %d", sig1.Passed)
+	if sig1.Passed != 3 {
+		t.Errorf("expected 3 tests passed for sig1 (4 run - 1 failed), got %d", sig1.Passed)
 	}
 	if sig1.Failures != 1 {
 		t.Errorf("expected 1 failure for sig1, got %d", sig1.Failures)
@@ -94,11 +94,11 @@ func TestHandlesSpecialSigLogicForSSP(t *testing.T) {
 	res := result.New(junitResults)
 
 	sig := res.SigMap["ssp"]
-	if sig.Run != 4 {
-		t.Errorf("expected 4 tests run for ssp, got %d", sig.Run)
+	if sig.Run != 2 {
+		t.Errorf("expected 2 tests run for ssp (4 total - 2 skipped), got %d", sig.Run)
 	}
 	if sig.Passed != 1 {
-		t.Errorf("expected 1 test passed for ssp (excluding skipped), got %d", sig.Passed)
+		t.Errorf("expected 1 test passed for ssp (2 run - 1 failed), got %d", sig.Passed)
 	}
 	if sig.Failures != 1 {
 		t.Errorf("expected 1 failure for ssp, got %d", sig.Failures)

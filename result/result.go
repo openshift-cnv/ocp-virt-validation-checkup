@@ -39,10 +39,10 @@ func New(junitResults map[string]junit.TestSuite) Result {
 
 		// Count both failures and errors as failures
 		totalFailures := testSuite.Failures + testSuite.Errors
-		passed := testSuite.Tests - totalFailures
-		if sig == "ssp" {
-			passed -= skipped
-		}
+
+		// Calculate tests that actually ran (excluding skipped)
+		testsRun := testSuite.Tests - skipped
+		passed := testsRun - totalFailures
 
 		// Convert time from seconds to duration string format (rounded to whole seconds)
 		var durationStr string
@@ -54,7 +54,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		}
 
 		sigRes := Sig{
-			Run:      testSuite.Tests,
+			Run:      testsRun,
 			Passed:   passed,
 			Failures: totalFailures,
 			Skipped:  skipped,
@@ -73,7 +73,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		}
 
 		res.SigMap[sig] = sigRes
-		res.Summary.Run += testSuite.Tests
+		res.Summary.Run += testsRun
 		res.Summary.Passed += passed
 		res.Summary.Failed += totalFailures
 		res.Summary.Skipped += skipped
