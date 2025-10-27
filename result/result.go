@@ -39,10 +39,14 @@ func New(junitResults map[string]junit.TestSuite) Result {
 
 		// Count both failures and errors as failures
 		totalFailures := testSuite.Failures + testSuite.Errors
+		passed := testSuite.Tests - totalFailures
 
-		// Calculate tests that actually ran (excluding skipped)
-		testsRun := testSuite.Tests - skipped
-		passed := testsRun - totalFailures
+		// For SSP, exclude skipped tests from both run count and passed count
+		testsRun := testSuite.Tests
+		if sig == "ssp" {
+			testsRun = testSuite.Tests - skipped
+			passed = testsRun - totalFailures
+		}
 
 		// Convert time from seconds to duration string format (rounded to whole seconds)
 		var durationStr string
