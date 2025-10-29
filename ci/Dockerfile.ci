@@ -1,0 +1,112 @@
+################################################################################
+# Build Stage 1: KubeVirt Test Binary
+################################################################################
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6 AS kubevirt-builder
+
+ARG KUBEVIRT_VERSION=v1.5.0
+
+WORKDIR /workspace
+RUN mkdir -p bin && \
+    curl -L -o bin/kubevirt.test https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/tests.test && \
+    chmod +x bin/kubevirt.test
+
+
+################################################################################
+# Build Stage 2: SSP Test Binary
+################################################################################
+FROM docker.io/library/golang:1.23 AS ssp-builder
+
+ARG SSP_VERSION=v0.23.0
+
+WORKDIR /workspace
+RUN git clone --depth 1 --branch ${SSP_VERSION} https://github.com/kubevirt/ssp-operator.git .
+RUN sed -i 's/kubevirt-os-images/openshift-virtualization-os-images/g' ./internal/constants.go
+RUN GOOS=linux CGO_ENABLED=1 go test -c -o bin/ssp.test ./tests
+
+
+################################################################################
+# Build Stage 3: Utilities and Tier2 Tests
+################################################################################
+FROM docker.io/library/golang:1.23 AS utilities-builder
+
+# Build arguments for user permissions
+ARG USER_UID=1001
+
+# Build junit_parser and progress_watcher utilities
+WORKDIR /workspace
+COPY . .
+RUN make build
+
+# Clone openshift-virtualization-tests repository for tier2 tests
+ARG OPENSHIFT_VIRT_TESTS_REPO=https://github.com/RedHatQE/openshift-virtualization-tests.git
+ARG OPENSHIFT_VIRT_TESTS_BRANCH=main
+ARG TEST_DIR=/openshift-virtualization-tests
+
+RUN git clone --depth 1 --branch ${OPENSHIFT_VIRT_TESTS_BRANCH} ${OPENSHIFT_VIRT_TESTS_REPO} ${TEST_DIR} && \
+    chown -R ${USER_UID}:0 ${TEST_DIR} && \
+    chmod -R ug+rwx ${TEST_DIR}
+
+
+################################################################################
+# Final Stage: Runtime Image
+################################################################################
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
+
+# User and home directory configuration
+ARG USER_NAME=ocp-virt-validation-checkup
+ARG USER_UID=1001
+ARG HOME=/home/${USER_NAME}
+
+ENV USER_UID=${USER_UID} \
+    USER_NAME=${USER_NAME} \
+    HOME=${HOME}
+
+# Install system dependencies and OpenShift CLI tools
+RUN microdnf install -y jq make tar gzip python3 git which sshpass && \
+    microdnf clean all && \
+    curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl && \
+    mkdir -p ${HOME} && \
+    chown ${USER_UID}:0 ${HOME} && \
+    chmod ug+rwx ${HOME}
+
+# Copy application scripts and manifests
+COPY --chown=${USER_UID}:0 --chmod=775 scripts ${HOME}/scripts
+COPY --chown=${USER_UID}:0 --chmod=775 manifests ${HOME}/manifests
+
+# Copy test binaries from builder stages
+COPY --from=kubevirt-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/kubevirt.test /usr/local/bin/kubevirt.test
+COPY --from=ssp-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/ssp.test /usr/local/bin/ssp.test
+
+# Copy utility binaries
+COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/junit_parser /usr/local/bin/junit_parser
+COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/progress_watcher /usr/local/bin/progress_watcher
+
+# Copy openshift-virtualization-tests for tier2 test suite
+COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /openshift-virtualization-tests /openshift-virtualization-tests
+
+# Create convenience symlinks for common commands
+RUN ln -s ${HOME}/manifests/run/generate.sh /usr/local/bin/generate && \
+    ln -s ${HOME}/manifests/fetch/get_results.sh /usr/local/bin/get_results
+
+# Create entrypoint wrapper to prevent running real tests with CI build
+RUN printf '#!/bin/bash\n\
+set -e\n\
+\n\
+# Prevent running real tests with CI build image\n\
+if [ "${DRY_RUN:-true}" != "true" ]; then\n\
+  echo "Error: Cannot run tests with DRY_RUN=false using a CI build image"\n\
+  echo "CI build images may contain outdated test versions and should only be used for dry-run validation"\n\
+  echo "Please set DRY_RUN=true or use a production image"\n\
+  exit 1\n\
+fi\n\
+\n\
+# Execute the actual entrypoint\n\
+exec %s/scripts/entrypoint.sh\n\
+' "${HOME}" > /usr/local/bin/ci-entrypoint.sh && chmod +x /usr/local/bin/ci-entrypoint.sh
+
+# Switch to non-root user
+USER ${USER_UID}
+WORKDIR ${HOME}
+
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["ci-entrypoint.sh"]
