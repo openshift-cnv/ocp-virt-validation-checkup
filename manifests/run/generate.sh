@@ -161,6 +161,7 @@ spec:
         app: ocp-virt-validation
     spec:
       serviceAccountName: ocp-virt-validation-sa
+      terminationGracePeriodSeconds: 60
       securityContext:
         fsGroup: 1001
       containers:
