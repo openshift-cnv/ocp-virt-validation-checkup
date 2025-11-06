@@ -41,18 +41,36 @@ progress_watcher --results-dir="${RESULTS_DIR}" &
 PROGRESS_WATCHER_PID=$!
 echo "Progress watcher started with PID: ${PROGRESS_WATCHER_PID}"
 
-# Function to cleanup progress watcher
-cleanup_progress_watcher() {
+# Global variable to track currently running test script
+CURRENT_TEST_PID=""
+
+# Function to cleanup progress watcher and forward signals
+cleanup_and_forward_signal() {
+    echo "Entrypoint received termination signal, cleaning up..."
+    
+    # Forward signal to currently running test script to trigger its trap
+    if [[ -n "${CURRENT_TEST_PID}" ]] && kill -0 "${CURRENT_TEST_PID}" 2>/dev/null; then
+        echo "Forwarding SIGTERM to test script (PID: ${CURRENT_TEST_PID})..."
+        kill -TERM "${CURRENT_TEST_PID}" 2>/dev/null || true
+        # Wait for the test script to cleanup gracefully
+        echo "Waiting for test script to complete cleanup..."
+        wait "${CURRENT_TEST_PID}" 2>/dev/null || true
+        echo "Test script cleanup completed."
+    fi
+    
+    # Cleanup progress watcher
     if [[ -n "${PROGRESS_WATCHER_PID}" ]] && kill -0 "${PROGRESS_WATCHER_PID}" 2>/dev/null; then
         echo "Stopping progress watcher (PID: ${PROGRESS_WATCHER_PID})..."
         kill "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
         wait "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
         echo "Progress watcher stopped."
     fi
+    
+    exit 1
 }
 
-# Set trap to cleanup progress watcher on script exit
-trap cleanup_progress_watcher EXIT INT TERM
+# Set trap to cleanup and forward signals
+trap cleanup_and_forward_signal INT TERM
 
 ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
@@ -214,7 +232,10 @@ fi
 # =======
 if suite_enabled "compute"; then
   echo "Running KubeVirt test suite..."
-  SIG="compute" "${TEST_KUBEVIRT_SCRIPT}"
+  SIG="compute" "${TEST_KUBEVIRT_SCRIPT}" &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
   echo "KubeVirt test suite has finished."
 else
   echo "KubeVirt test suite has been skipped."
@@ -226,7 +247,10 @@ fi
 # =======
 if suite_enabled "network"; then
   echo "Running Network test suite..."
-  SIG="network" "${TEST_KUBEVIRT_SCRIPT}"
+  SIG="network" "${TEST_KUBEVIRT_SCRIPT}" &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
   echo "Network test suite has finished."
 else
   echo "Network test suite has been skipped."
@@ -238,7 +262,10 @@ fi
 # =======
 if suite_enabled "storage"; then
   echo "Running Storage test suite..."
-  SIG="storage" "${TEST_KUBEVIRT_SCRIPT}"
+  SIG="storage" "${TEST_KUBEVIRT_SCRIPT}" &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
   echo "Storage test suite has finished."
 else
   echo "Storage test suite has been skipped."
@@ -250,7 +277,10 @@ fi
 # ====
 if suite_enabled "ssp"; then
   echo "Running SSP test suite..."
-  ${SCRIPT_DIR}/ssp/test-ssp.sh
+  ${SCRIPT_DIR}/ssp/test-ssp.sh &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
 else
   echo "SSP test suite has been skipped."
 fi
@@ -261,7 +291,10 @@ fi
 # =======
 if suite_enabled "tier2"; then
   echo "Running Tier-2 (openshift-virtualization-tests) test suite..."
-  ${SCRIPT_DIR}/tier2/test-tier2.sh
+  ${SCRIPT_DIR}/tier2/test-tier2.sh &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
   echo "Tier-2 test suite has finished."
 else
   echo "Tier-2 test suite has been skipped."

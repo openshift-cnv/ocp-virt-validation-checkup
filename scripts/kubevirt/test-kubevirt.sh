@@ -54,17 +54,39 @@ function cleanup_disk_images_provider() {
     fi
 }
 
+function cleanup_test_namespaces() {
+    echo "Cleaning up test namespaces..."
+    for ns in kubevirt-test-alternative1 kubevirt-test-default1 kubevirt-test-operator1 kubevirt-test-privileged1; do
+        if oc get namespace "$ns" &>/dev/null; then
+            echo "Deleting namespace: $ns"
+            oc delete namespace "$ns" --ignore-not-found=true
+        fi
+    done
+    echo "Test namespaces deletion initiated"
+}
+
 function cleanup_and_exit() {
     echo "Script interrupted, cleaning up..."
+    
+    # Terminate the test process gracefully if it's running
+    if [ -n "${TEST_PID}" ] && kill -0 "${TEST_PID}" 2>/dev/null; then
+        echo "Sending SIGTERM to test process (PID: ${TEST_PID})..."
+        kill -TERM "${TEST_PID}" 2>/dev/null || true
+        echo "Waiting for test process to terminate..."
+        wait "${TEST_PID}" 2>/dev/null || true
+        echo "Test process terminated."
+    fi
+    
     cleanup_disk_images_provider
+    cleanup_test_namespaces
     exit 1
 }
 
-# Set up signal traps for cleanup
-trap cleanup_and_exit SIGINT SIGTERM
-
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 readonly TARGET_NAMESPACE="openshift-cnv"
+
+# Set up signal traps for cleanup EARLY
+trap cleanup_and_exit SIGINT SIGTERM
 
 skip_tests+=('\[QUARANTINE\]')
 if [ -n "${TEST_SKIPS}" ]; then
@@ -179,7 +201,14 @@ ${TESTS_BINARY} \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
-    "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt
+    "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt &
+
+# Store the PID for cleanup
+TEST_PID=$!
+echo "Test process started with PID: ${TEST_PID}"
+
+# Wait for the test to complete
+wait ${TEST_PID}
 
 # Cleanup disk-images-provider resources if they were applied
 cleanup_disk_images_provider

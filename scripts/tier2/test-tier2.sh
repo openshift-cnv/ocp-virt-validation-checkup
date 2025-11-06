@@ -2,9 +2,46 @@
 
 set -e
 
+function cleanup_test_namespaces() {
+    echo "Cleaning up tier2 test namespaces..."
+    for ns in cnv-tests-run-in-progress-ns cnv-tests-utilities; do
+        if oc get namespace "$ns" &>/dev/null; then
+            echo "Deleting namespace: $ns"
+            oc delete namespace "$ns" --ignore-not-found=true
+        fi
+    done
+    echo "Tier2 test namespaces deletion initiated"
+}
+
+function cleanup_and_exit() {
+    echo "Tier2 script interrupted, cleaning up..."
+    
+    # Terminate the test process gracefully if it's running
+    if [ -n "${TEST_PID}" ] && kill -0 "${TEST_PID}" 2>/dev/null; then
+        echo "Sending SIGTERM to tier2 test process (PID: ${TEST_PID})..."
+        kill -TERM "${TEST_PID}" 2>/dev/null || true
+        echo "Waiting for tier2 test process to terminate..."
+        wait "${TEST_PID}" 2>/dev/null || true
+        echo "Tier2 test process terminated."
+    fi
+    
+    cleanup_test_namespaces
+    exit 1
+}
+
+# Set up signal traps for cleanup EARLY
+trap cleanup_and_exit SIGINT SIGTERM
+
 cd /openshift-virtualization-tests
-oc image extract ghcr.io/astral-sh/uv:latest --file /uv,/uvx
-chmod +x uv uvx
+
+# Check if uv binaries already exist to avoid re-extraction
+if [ ! -f "./uv" ] || [ ! -f "./uvx" ]; then
+    echo "Extracting uv binaries..."
+    oc image extract ghcr.io/astral-sh/uv:latest --file /uv,/uvx
+    chmod +x uv uvx
+else
+    echo "uv binaries already exist, skipping extraction"
+fi
 
 ./uv sync --locked
 ./uv export --no-hashes
@@ -140,4 +177,11 @@ echo "Starting tier2 tests 🧪"
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml" 2>&1 | tee ${ARTIFACTS}/tier2-log.txt || true
+  --junitxml="${ARTIFACTS}/junit.results.xml" 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
+
+# Store the PID for cleanup
+TEST_PID=$!
+echo "Tier2 test process started with PID: ${TEST_PID}"
+
+# Wait for the test to complete
+wait ${TEST_PID} || true
