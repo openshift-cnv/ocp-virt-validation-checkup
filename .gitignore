@@ -9,3 +9,4 @@ Pipfile.lock
 .env.test.local
 .env.production.local
 .dockerconfigjson
+CLAUDE.md
