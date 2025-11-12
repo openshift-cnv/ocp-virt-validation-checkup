@@ -176,8 +176,8 @@ fi
 
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
-# Apply disk-images-provider if running storage tests
-if [ "${SIG}" == "storage" ]; then
+# Apply disk-images-provider if running storage tests (but not in dry-run mode)
+if [ "${SIG}" == "storage" ] && [ -z "${DRY_RUN_FLAG}" ]; then
     apply_disk_images_provider
 fi
 
