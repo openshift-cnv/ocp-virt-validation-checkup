@@ -6,6 +6,74 @@ readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/funcs.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
+create_kubeconfig
+
+# Check if we should only create results resources and exit
+if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
+  if [ -z "${TIMESTAMP}" ]; then
+    echo "Error: CREATE_RESULTS_RESOURCES is set to 'true' but TIMESTAMP is not provided."
+    exit 1
+  fi
+  
+  echo "Creating results resources for TIMESTAMP=${TIMESTAMP}..."
+  GET_RESULTS_SCRIPT="${SCRIPT_DIR}/../manifests/fetch/get_results.sh"
+  
+  if [ ! -f "${GET_RESULTS_SCRIPT}" ]; then
+    echo "Error: get_results.sh script not found at ${GET_RESULTS_SCRIPT}"
+    exit 1
+  fi
+  
+  # Export TIMESTAMP and POD_NAMESPACE for the script
+  export TIMESTAMP
+  export POD_NAMESPACE="${POD_NAMESPACE:-ocp-virt-validation}"
+  
+  # Run the script and apply its output
+  echo "Running get_results.sh and applying resources..."
+  bash "${GET_RESULTS_SCRIPT}" | oc apply -f -
+  
+  if [ $? -eq 0 ]; then
+    echo "Results resources created successfully."
+    
+    # Wait a moment for the route to be fully created
+    sleep 2
+    
+    # Extract the route URL
+    ROUTE_HOST=$(oc get route pvcreader-${TIMESTAMP} -n ${POD_NAMESPACE} -o jsonpath='{.status.ingress[0].host}' 2>/dev/null)
+    
+    if [ -n "${ROUTE_HOST}" ]; then
+      DETAILED_RESULT_URL="https://${ROUTE_HOST}"
+      echo "Route URL: ${DETAILED_RESULT_URL}"
+      
+      # Update the ConfigMap with the detailed_result_url
+      CONFIGMAP_NAME="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
+      if oc get configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} &>/dev/null; then
+        echo "Updating ConfigMap ${CONFIGMAP_NAME} with detailed_result_url..."
+        oc patch configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} --type=merge -p "{\"data\":{\"detailed_result_url\":\"${DETAILED_RESULT_URL}\"}}"
+        
+        if [ $? -eq 0 ]; then
+          echo "ConfigMap updated successfully with detailed_result_url: ${DETAILED_RESULT_URL}"
+        else
+          echo "Warning: Failed to update ConfigMap with detailed_result_url"
+        fi
+      else
+        echo "Warning: ConfigMap ${CONFIGMAP_NAME} not found, skipping detailed_result_url update"
+      fi
+      
+      echo "To view the results, visit: ${DETAILED_RESULT_URL}"
+    else
+      echo "Warning: Could not extract route URL"
+      echo "To view the results, run:"
+      echo "  oc get route pvcreader-${TIMESTAMP} -n ${POD_NAMESPACE} -o jsonpath='{.status.ingress[0].host}'"
+    fi
+    
+    exit 0
+  else
+    echo "Error: Failed to create results resources."
+    exit 1
+  fi
+fi
+
+# Normal test execution flow continues below
 DRY_RUN_FLAG=""
 if [ "${DRY_RUN}" == "true" ]
 then
@@ -13,7 +81,6 @@ then
 fi
 export DRY_RUN_FLAG
 
-create_kubeconfig
 get_virtctl
 
 REGISTRY_CONFIG=$(mktemp)
