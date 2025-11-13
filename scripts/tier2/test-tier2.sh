@@ -34,10 +34,13 @@ trap cleanup_and_exit SIGINT SIGTERM
 
 cd /openshift-virtualization-tests
 
+# Set default registry server if not provided
+REGISTRY_SERVER="${REGISTRY_SERVER:-ghcr.io}"
+
 # Check if uv binaries already exist to avoid re-extraction
 if [ ! -f "./uv" ] || [ ! -f "./uvx" ]; then
-    echo "Extracting uv binaries..."
-    oc image extract ghcr.io/astral-sh/uv:latest --file /uv,/uvx
+    echo "Extracting uv binaries from ${REGISTRY_SERVER}/astral-sh/uv:latest..."
+    oc image extract ${REGISTRY_SERVER}/astral-sh/uv:latest --file /uv,/uvx
     chmod +x uv uvx
 else
     echo "uv binaries already exist, skipping extraction"
