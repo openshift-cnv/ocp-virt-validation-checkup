@@ -40,7 +40,7 @@ wget --no-check-certificate \
      --no-host-directories \
      --directory-prefix="${RESULTS_DIR}" \
      --quiet \
-     https://${RESULTS_URL}/
+     https://${RESULTS_URL}/ || true
 
 SUMMARY_LOG="${RESULTS_DIR}/summary-log.txt"
 if [ ! -s "${SUMMARY_LOG}" ]; then
@@ -59,9 +59,13 @@ if [ -n "${ARTIFACT_DIR:-}" ]; then
   if [ -n "${JUNIT_FILES}" ]; then
     while IFS= read -r junit_file; do
       if [ -f "${junit_file}" ]; then
-        cp "${junit_file}" "${ARTIFACT_DIR}/"
+        # Generate unique filename using the subdirectory name
+        BASENAME=$(basename "${junit_file}")
+        PARENT_DIR=$(basename "$(dirname "${junit_file}")")
+        DEST_FILE="${ARTIFACT_DIR}/${PARENT_DIR}_${BASENAME}"
+        cp "${junit_file}" "${DEST_FILE}"
         JUNIT_COUNT=$((JUNIT_COUNT + 1))
-        echo "  Copied: $(basename ${junit_file})"
+        echo "  Copied: ${junit_file} -> $(basename ${DEST_FILE})"
       fi
     done <<< "${JUNIT_FILES}"
     echo "Total JUnit files copied: ${JUNIT_COUNT}"
