@@ -197,7 +197,7 @@ ${TESTS_BINARY} \
     -kubectl-path=/usr/bin/oc \
     -virtctl-path=/home/ocp-virt-validation-checkup/virtctl \
     -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
-    -utility-container-prefix=quay.io/kubevirt \
+    -utility-container-prefix="${REGISTRY_SERVER:-quay.io}/kubevirt" \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \

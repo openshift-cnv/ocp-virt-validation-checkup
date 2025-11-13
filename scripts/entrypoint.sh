@@ -98,6 +98,9 @@ then
 fi
 export KUBEVIRT_RELEASE="v${KUBEVIRT_TAG%%-[0-9]*}"
 
+# Set default registry server if not provided
+REGISTRY_SERVER="${REGISTRY_SERVER:-quay.io}"
+
 mkdir -p ${RESULTS_DIR}
 START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${START_TIMESTAMP} > ${RESULTS_DIR}/startTimestamp
