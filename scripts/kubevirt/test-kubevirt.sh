@@ -85,6 +85,9 @@ function cleanup_and_exit() {
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 readonly TARGET_NAMESPACE="openshift-cnv"
 
+# Set default registry server if not provided
+REGISTRY_SERVER="${REGISTRY_SERVER:-quay.io}"
+
 # Set up signal traps for cleanup EARLY
 trap cleanup_and_exit SIGINT SIGTERM
 
@@ -197,7 +200,7 @@ ${TESTS_BINARY} \
     -kubectl-path=/usr/bin/oc \
     -virtctl-path=/home/ocp-virt-validation-checkup/virtctl \
     -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
-    -utility-container-prefix="${REGISTRY_SERVER:-quay.io}/kubevirt" \
+    -utility-container-prefix="${REGISTRY_SERVER}/kubevirt" \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
