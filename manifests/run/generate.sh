@@ -40,7 +40,7 @@ fi
 
 
 TEST_SKIPS=${TEST_SKIPS:-""}
-REGISTRY_SERVER=${REGISTRY_SERVER:-"quay.io"}
+REGISTRY_SERVER=${REGISTRY_SERVER:-""}
 
 VALID_SKIP_REGEX='^([a-zA-Z0-9_:|-]+)(\|([a-zA-Z0-9_:|-]+))*$'
 if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
