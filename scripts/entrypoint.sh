@@ -44,19 +44,23 @@ if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
       DETAILED_RESULT_URL="https://${ROUTE_HOST}"
       echo "Route URL: ${DETAILED_RESULT_URL}"
       
-      # Update the ConfigMap with the detailed_result_url
+      # Update the ConfigMap with detailed_results_url and detailed_results_file
       CONFIGMAP_NAME="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
       if oc get configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} &>/dev/null; then
-        echo "Updating ConfigMap ${CONFIGMAP_NAME} with detailed_result_url..."
-        oc patch configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} --type=merge -p "{\"data\":{\"detailed_result_url\":\"${DETAILED_RESULT_URL}\"}}"
+        echo "Updating ConfigMap ${CONFIGMAP_NAME} with detailed results..."
+
+        # Add detailed_results_url and detailed_results_file as separate keys
+        oc patch configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} --type=merge -p "{\"data\":{\"detailed_results_url\":\"${DETAILED_RESULT_URL}\",\"detailed_results_file\":\"test-results-${TIMESTAMP}.tar.gz\"}}"
         
         if [ $? -eq 0 ]; then
-          echo "ConfigMap updated successfully with detailed_result_url: ${DETAILED_RESULT_URL}"
+          echo "ConfigMap updated successfully with detailed results:"
+          echo "  URL: ${DETAILED_RESULT_URL}"
+          echo "  Filename: test-results-${TIMESTAMP}.tar.gz"
         else
-          echo "Warning: Failed to update ConfigMap with detailed_result_url"
+          echo "Warning: Failed to update ConfigMap with detailed results"
         fi
       else
-        echo "Warning: ConfigMap ${CONFIGMAP_NAME} not found, skipping detailed_result_url update"
+        echo "Warning: ConfigMap ${CONFIGMAP_NAME} not found, skipping detailed results update"
       fi
       
       echo "To view the results, visit: ${DETAILED_RESULT_URL}"
