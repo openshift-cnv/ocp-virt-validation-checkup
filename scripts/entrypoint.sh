@@ -106,14 +106,11 @@ mkdir -p ${RESULTS_DIR}
 START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${START_TIMESTAMP} > ${RESULTS_DIR}/startTimestamp
 
-# Start progress watcher in background
-echo "Starting progress watcher for multi-suite monitoring..."
-progress_watcher --results-dir="${RESULTS_DIR}" &
-PROGRESS_WATCHER_PID=$!
-echo "Progress watcher started with PID: ${PROGRESS_WATCHER_PID}"
-
 # Global variable to track currently running test script
 CURRENT_TEST_PID=""
+
+# Progress watcher PID (will be started later after storage config is set)
+PROGRESS_WATCHER_PID=""
 
 # Function to cleanup progress watcher and forward signals
 cleanup_and_forward_signal() {
@@ -281,6 +278,7 @@ if [ -n "${STORAGE_CAPABILITIES}" ]; then
   
   # Use the custom configuration
   export KUBEVIRT_STORAGE_CONFIGURATION_FILE="$(basename "$custom_config_file")"
+  export KUBEVIRT_STORAGE_CONFIG_IS_CUSTOM="true"
   echo "Custom storage configuration created and will be used: ${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
   echo "Configuration content:"
   cat "$custom_config_file"
@@ -290,13 +288,20 @@ else
   # Also export in a format similar to KUBEVIRT_TESTING_CONFIGURATION_FILE for consistency
   if [ -n "${STORAGE_CONFIG_FILE}" ]; then
     export KUBEVIRT_STORAGE_CONFIGURATION_FILE="${STORAGE_CONFIG_FILE}.json"
+    export KUBEVIRT_STORAGE_CONFIG_IS_CUSTOM="false"
     echo "Storage configuration will use: ${KUBEVIRT_STORAGE_CONFIGURATION_FILE}"
   else
     # Clear the variable if no storage config file was found
     unset KUBEVIRT_STORAGE_CONFIGURATION_FILE
+    unset KUBEVIRT_STORAGE_CONFIG_IS_CUSTOM
   fi
 fi
 
+# Start progress watcher in background AFTER storage config is set
+echo "Starting progress watcher for multi-suite monitoring..."
+progress_watcher --results-dir="${RESULTS_DIR}" &
+PROGRESS_WATCHER_PID=$!
+echo "Progress watcher started with PID: ${PROGRESS_WATCHER_PID}"
 
 # =======
 # compute

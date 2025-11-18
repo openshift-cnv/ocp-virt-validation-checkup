@@ -167,6 +167,33 @@ func main() {
 
 	// Discover test totals upfront using dry-run (unless skipped)
 	if !*skipDryRun {
+		// Log storage configuration status
+		storageConfigFile := os.Getenv("KUBEVIRT_STORAGE_CONFIGURATION_FILE")
+		testingConfigFile := os.Getenv("KUBEVIRT_TESTING_CONFIGURATION_FILE")
+		storageClass := os.Getenv("STORAGE_CLASS")
+
+		logger.Printf("Storage configuration environment:")
+		logger.Printf("  KUBEVIRT_STORAGE_CONFIGURATION_FILE: %s\n", storageConfigFile)
+		logger.Printf("  KUBEVIRT_TESTING_CONFIGURATION_FILE: %s\n", testingConfigFile)
+		logger.Printf("  STORAGE_CLASS: %s\n", storageClass)
+
+		// Check if custom storage config file exists (only for custom configs)
+		if storageConfigFile != "" {
+			isCustom := os.Getenv("KUBEVIRT_STORAGE_CONFIG_IS_CUSTOM")
+			if isCustom == "true" {
+				configPath := filepath.Join(*resultsDir, storageConfigFile)
+				if fileExists(configPath) {
+					logger.Printf("Using custom storage config file: %s\n", configPath)
+				} else {
+					logger.Printf("Warning: Custom storage config file not found at %s\n", configPath)
+				}
+			} else {
+				logger.Printf("Using predefined storage config: %s (from scripts directory)\n", storageConfigFile)
+			}
+		} else {
+			logger.Printf("No KUBEVIRT_STORAGE_CONFIGURATION_FILE set, will use KUBEVIRT_TESTING_CONFIGURATION_FILE or defaults\n")
+		}
+
 		logger.Println("Running dry-run discovery to determine total test counts...")
 
 		// Run with timeout to avoid hanging
@@ -377,10 +404,15 @@ func discoverTestTotalsByDryRun(resultsDir string) map[string]int {
 		testSuitesEnv = "compute,network,storage,ssp,tier2" // Default all suites
 	}
 
+	logger.Printf("TEST_SUITES environment variable: %s\n", testSuitesEnv)
+
 	configuredSuites := strings.Split(testSuitesEnv, ",")
+	logger.Printf("Will attempt dry-run discovery for %d suites\n", len(configuredSuites))
+
 	for _, suiteName := range configuredSuites {
 		suiteName = strings.TrimSpace(suiteName)
 		if suiteName == "" {
+			logger.Printf("Skipping empty suite name\n")
 			continue
 		}
 
@@ -405,6 +437,25 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	if err := os.MkdirAll(suiteResultsDir, 0755); err != nil {
 		logger.Printf("Failed to create dry-run results directory for %s: %v\n", suiteName, err)
 		return 0
+	}
+
+	// Copy custom storage configuration file to dry-run directory if it's a custom config
+	if storageConfigFile := os.Getenv("KUBEVIRT_STORAGE_CONFIGURATION_FILE"); storageConfigFile != "" {
+		isCustom := os.Getenv("KUBEVIRT_STORAGE_CONFIG_IS_CUSTOM")
+		if isCustom == "true" {
+			srcPath := filepath.Join(resultsDir, storageConfigFile)
+			if fileExists(srcPath) {
+				dstPath := filepath.Join(dryRunBaseDir, storageConfigFile)
+				if err := copyFile(srcPath, dstPath); err != nil {
+					logger.Printf("[%s] Warning: Failed to copy storage config to dry-run dir: %v\n", suiteName, err)
+				} else {
+					logger.Printf("[%s] Copied custom storage config from %s to %s\n", suiteName, srcPath, dstPath)
+				}
+			} else {
+				logger.Printf("[%s] Warning: Custom storage config file not found at %s\n", suiteName, srcPath)
+			}
+		}
+		// For predefined configs, no need to copy - they're already in the scripts directory
 	}
 
 	// Determine script directory - same logic as entrypoint.sh
@@ -466,12 +517,32 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 		fmt.Sprintf("SCRIPT_DIR=%s", scriptDir),
 	)
 
+	// Add common environment variables needed by test scripts
+	if kubevirtRelease := os.Getenv("KUBEVIRT_RELEASE"); kubevirtRelease != "" {
+		env = append(env, fmt.Sprintf("KUBEVIRT_RELEASE=%s", kubevirtRelease))
+	}
+	if storageConfigFile := os.Getenv("KUBEVIRT_STORAGE_CONFIGURATION_FILE"); storageConfigFile != "" {
+		env = append(env, fmt.Sprintf("KUBEVIRT_STORAGE_CONFIGURATION_FILE=%s", storageConfigFile))
+	}
+	if testingConfigFile := os.Getenv("KUBEVIRT_TESTING_CONFIGURATION_FILE"); testingConfigFile != "" {
+		env = append(env, fmt.Sprintf("KUBEVIRT_TESTING_CONFIGURATION_FILE=%s", testingConfigFile))
+	}
+	if storageClass := os.Getenv("STORAGE_CLASS"); storageClass != "" {
+		env = append(env, fmt.Sprintf("STORAGE_CLASS=%s", storageClass))
+	}
+	if registryServer := os.Getenv("REGISTRY_SERVER"); registryServer != "" {
+		env = append(env, fmt.Sprintf("REGISTRY_SERVER=%s", registryServer))
+	}
+	if fullSuite := os.Getenv("FULL_SUITE"); fullSuite != "" {
+		env = append(env, fmt.Sprintf("FULL_SUITE=%s", fullSuite))
+	}
+	if testSkips := os.Getenv("TEST_SKIPS"); testSkips != "" {
+		env = append(env, fmt.Sprintf("TEST_SKIPS=%s", testSkips))
+	}
+
 	// Add suite-specific environment variables
 	if suiteName == "tier2" {
 		// tier2 needs storage class and subscription info
-		if storageClass := os.Getenv("STORAGE_CLASS"); storageClass != "" {
-			env = append(env, fmt.Sprintf("STORAGE_CLASS=%s", storageClass))
-		}
 		if defaultStorageClass := os.Getenv("DEFAULT_STORAGE_CLASS"); defaultStorageClass != "" {
 			env = append(env, fmt.Sprintf("DEFAULT_STORAGE_CLASS=%s", defaultStorageClass))
 		}
@@ -530,9 +601,8 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.Printf("Dry-run failed for %s: %v\n", suiteName, err)
-		if *verbose {
-			logger.Printf("[%s] DEBUG: Dry-run output (first 500 chars): %s\n", suiteName, truncateString(string(output), 500))
-		}
+		// Always show output on error to help debug, not just in verbose mode
+		logger.Printf("[%s] Dry-run error output (first 1000 chars):\n%s\n", suiteName, truncateString(string(output), 1000))
 		// Don't return 0 immediately, try to parse output anyway in case partial info is available
 	} else if *verbose {
 		logger.Printf("[%s] DEBUG: Dry-run succeeded, output length: %d chars\n", suiteName, len(output))
@@ -546,6 +616,24 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
 // truncateString truncates a string to a maximum length
@@ -567,6 +655,7 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 		if match := specRegex.FindStringSubmatch(line); match != nil {
 			var count int
 			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				logger.Printf("[%s] Parsed test count from Ginkgo pattern: %d\n", suiteName, count)
 				return count
 			}
 		}
@@ -575,6 +664,7 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 		if match := pytestRegex.FindStringSubmatch(line); match != nil {
 			var count int
 			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				logger.Printf("[%s] Parsed test count from pytest pattern: %d\n", suiteName, count)
 				return count
 			}
 		}
@@ -583,6 +673,7 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 		if match := pytestRegexSimple.FindStringSubmatch(line); match != nil {
 			var count int
 			if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+				logger.Printf("[%s] Parsed test count from simple pytest pattern: %d\n", suiteName, count)
 				return count
 			}
 		}
@@ -594,6 +685,7 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 			if match := re.FindStringSubmatch(line); match != nil {
 				var count int
 				if _, err := fmt.Sscanf(match[1], "%d", &count); err == nil {
+					logger.Printf("[%s] Parsed test count from additional pattern: %d\n", suiteName, count)
 					return count
 				}
 			}
@@ -601,6 +693,7 @@ func parseTestCountFromDryRun(output, suiteName string) int {
 	}
 
 	logger.Printf("Could not parse test count from dry-run output for %s\n", suiteName)
+	logger.Printf("[%s] Dry-run output sample (first 500 chars):\n%s\n", suiteName, truncateString(output, 500))
 	return 0
 }
 
