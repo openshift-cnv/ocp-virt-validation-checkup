@@ -17,7 +17,7 @@ TIMESTAMP="${TIMESTAMP}" \
 echo "=== Waiting for pvc-reader pod to be ready ==="
 oc wait --for=condition=ready --timeout=2m pod -n ocp-virt-validation -l app=pvc-reader
 
-RESULTS_URL=$(oc get route pvcreader -n ocp-virt-validation -o jsonpath='{.status.ingress[0].host}')
+RESULTS_URL=$(oc get route pvcreader-${TIMESTAMP} -n ocp-virt-validation -o jsonpath='{.status.ingress[0].host}')
 
 echo "=== Waiting for nginx service to be available ==="
 if timeout 120 bash -c "until wget --no-check-certificate --spider --timeout=5 -q 'https://${RESULTS_URL}/'; do sleep 5; done"; then
