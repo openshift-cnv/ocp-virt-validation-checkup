@@ -20,6 +20,34 @@ else
   PVC_CLAIM_NAME="ocp-virt-validation-pvc-${TIMESTAMP}"
 fi
 
+# Get job name and UID from the ConfigMap's owner reference
+# The ConfigMap should already have the job as its owner
+CONFIGMAP_TO_CHECK="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
+JOB_INFO=$(oc get configmap "${CONFIGMAP_TO_CHECK}" -n "${NAMESPACE}" -o jsonpath='{.metadata.ownerReferences[?(@.kind=="Job")]}' 2>/dev/null)
+
+if [ -z "${JOB_INFO}" ]; then
+  echo "Warning: Could not find Job owner reference in ConfigMap ${CONFIGMAP_TO_CHECK}, owner references will not be set" >&2
+  OWNER_REFERENCE=""
+else
+  JOB_NAME=$(echo "${JOB_INFO}" | jq -r '.name')
+  JOB_UID=$(echo "${JOB_INFO}" | jq -r '.uid')
+  JOB_API_VERSION=$(echo "${JOB_INFO}" | jq -r '.apiVersion')
+
+  if [ -z "${JOB_NAME}" ] || [ -z "${JOB_UID}" ] || [ "${JOB_NAME}" == "null" ] || [ "${JOB_UID}" == "null" ]; then
+    echo "Warning: Could not extract job information from ConfigMap owner reference, owner references will not be set" >&2
+    OWNER_REFERENCE=""
+  else
+    echo "Found owner Job from ConfigMap: ${JOB_NAME} (UID: ${JOB_UID})" >&2
+    OWNER_REFERENCE="ownerReferences:
+  - apiVersion: ${JOB_API_VERSION}
+    kind: Job
+    name: ${JOB_NAME}
+    uid: ${JOB_UID}
+    controller: true
+    blockOwnerDeletion: true"
+  fi
+fi
+
 # nginx config map
 cat <<EOF
 ---
@@ -27,7 +55,8 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-conf
-  namespace: ${NAMESPACE}
+  namespace: ${NAMESPACE}${OWNER_REFERENCE:+
+  }${OWNER_REFERENCE}
 data:
   nginx.conf: |-
     user nginx;
@@ -106,7 +135,8 @@ metadata:
     app: pvc-reader
     timestamp: "${TIMESTAMP}"
   name: pvc-reader-${TIMESTAMP}
-  namespace: ${NAMESPACE}
+  namespace: ${NAMESPACE}${OWNER_REFERENCE:+
+  }${OWNER_REFERENCE}
 spec:
   containers:
     - image: registry.redhat.io/rhel9/nginx-124:latest
@@ -146,7 +176,8 @@ metadata:
     app: pvc-reader
     timestamp: "${TIMESTAMP}"
   name: pvc-reader-${TIMESTAMP}
-  namespace: ${NAMESPACE}
+  namespace: ${NAMESPACE}${OWNER_REFERENCE:+
+  }${OWNER_REFERENCE}
 spec:
   ports:
     - name: nginx
@@ -169,7 +200,8 @@ metadata:
   namespace: ${NAMESPACE}
   labels:
     app: pvc-reader
-    timestamp: "${TIMESTAMP}"
+    timestamp: "${TIMESTAMP}"${OWNER_REFERENCE:+
+  }${OWNER_REFERENCE}
 spec:
   path: /
   port:
