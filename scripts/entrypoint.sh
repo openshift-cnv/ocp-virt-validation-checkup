@@ -8,6 +8,60 @@ TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
 create_kubeconfig
 
+# Add owner reference to PVC so it gets cleaned up when the job is deleted
+add_pvc_owner_reference() {
+  local namespace="${POD_NAMESPACE:-ocp-virt-validation}"
+  local pod_name="${POD_NAME}"
+
+  # Determine PVC name: derive from CONFIGMAP_NAME by removing -results suffix, or use default
+  local pvc_name
+  if [ -n "${CONFIGMAP_NAME}" ]; then
+    # Remove -results suffix if present (for UI)
+    pvc_name="${CONFIGMAP_NAME%-results}"
+  else
+    pvc_name="ocp-virt-validation-pvc-${TIMESTAMP}"
+  fi
+
+  if [ -z "${pod_name}" ]; then
+    echo "Warning: POD_NAME not set, skipping PVC owner reference"
+    return
+  fi
+
+  echo "Adding owner reference to PVC ${pvc_name}..."
+
+  # Get job name and UID from the pod's owner reference
+  local job_info=$(oc get pod "${pod_name}" -n "${namespace}" -o jsonpath='{.metadata.ownerReferences[?(@.kind=="Job")]}' 2>/dev/null)
+
+  if [ -z "${job_info}" ]; then
+    echo "Warning: Could not find Job owner for pod ${pod_name}, skipping PVC owner reference"
+    return
+  fi
+
+  local job_name=$(echo "${job_info}" | jq -r '.name')
+  local job_uid=$(echo "${job_info}" | jq -r '.uid')
+
+  if [ -z "${job_name}" ] || [ -z "${job_uid}" ] || [ "${job_name}" == "null" ] || [ "${job_uid}" == "null" ]; then
+    echo "Warning: Could not extract job name or UID from pod owner reference, skipping PVC owner reference"
+    return
+  fi
+
+  echo "Found owner Job: ${job_name} (UID: ${job_uid})"
+
+  # Patch PVC with owner reference
+  oc patch pvc "${pvc_name}" -n "${namespace}" --type=json -p "[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[{\"apiVersion\":\"batch/v1\",\"kind\":\"Job\",\"name\":\"${job_name}\",\"uid\":\"${job_uid}\",\"controller\":true,\"blockOwnerDeletion\":true}]}]" 2>/dev/null
+
+  if [ $? -eq 0 ]; then
+    echo "Successfully added owner reference to PVC ${pvc_name}"
+  else
+    echo "Warning: Failed to add owner reference to PVC ${pvc_name}"
+  fi
+}
+
+# Add owner reference to PVC if TIMESTAMP is set
+if [ -n "${TIMESTAMP}" ]; then
+  add_pvc_owner_reference
+fi
+
 # Check if we should only create results resources and exit
 if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
   if [ -z "${TIMESTAMP}" ]; then
