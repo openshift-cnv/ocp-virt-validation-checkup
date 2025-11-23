@@ -144,10 +144,23 @@ get_virtctl
 REGISTRY_CONFIG=$(mktemp)
 oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${REGISTRY_CONFIG}"
 VIRT_OPERATOR_IMAGE=$(oc get deployment virt-operator -n openshift-cnv -o jsonpath='{.spec.template.spec.containers[0].image}')
-KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
+
+# Replace registry server if REGISTRY_SERVER is provided
+INSECURE_FLAG=""
+if [ -n "${REGISTRY_SERVER}" ]; then
+  echo "Replacing registry server with: ${REGISTRY_SERVER}"
+  # Extract the image path after the registry (everything after the first '/')
+  # This handles both registry.redhat.io/path/to/image and registry.redhat.io:port/path/to/image
+  IMAGE_PATH=$(echo "${VIRT_OPERATOR_IMAGE}" | sed 's|^[^/]*/||')
+  VIRT_OPERATOR_IMAGE="${REGISTRY_SERVER}/${IMAGE_PATH}"
+  echo "Using virt-operator image: ${VIRT_OPERATOR_IMAGE}"
+  INSECURE_FLAG="--insecure=true"
+fi
+
+KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${INSECURE_FLAG} ${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
 if [ -z "${KUBEVIRT_TAG}" ]
 then
-  KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} brew.${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
+  KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${INSECURE_FLAG} brew.${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
 fi
 if [ -z "${KUBEVIRT_TAG}" ]
 then
