@@ -166,6 +166,15 @@ else
   DRY_RUN_FLAG=""
 fi
 
+# Check if cluster is running on hosted control plane
+CONTROL_PLANE_TOPOLOGY=$(oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}' 2>/dev/null || echo "")
+if [ "${CONTROL_PLANE_TOPOLOGY}" == "External" ]; then
+  echo "Detected hosted control plane (External topology), adding --tc=no_unprivileged_client:True"
+  HCP_FLAG="--tc=no_unprivileged_client:True"
+else
+  HCP_FLAG=""
+fi
+
 export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
 
 echo "Starting tier2 tests 🧪"
@@ -175,6 +184,7 @@ echo "Starting tier2 tests 🧪"
   --tc=hco_subscription:${SUBSCRIPTION_NAME} \
   --conformance-storage-class=${STORAGE_CLASS} \
   ${STORAGE_CLASS_CONFIG} \
+  ${HCP_FLAG} \
   -s -o log_cli=true \
   ${DRY_RUN_FLAG} \
   --data-collector \
