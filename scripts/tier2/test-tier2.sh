@@ -181,6 +181,7 @@ echo "Starting tier2 tests 🧪"
 ./uv run pytest \
   -m "conformance" \
   --skip-artifactory-check \
+  --latest-rhel \
   --tc=hco_subscription:${SUBSCRIPTION_NAME} \
   --conformance-storage-class=${STORAGE_CLASS} \
   ${STORAGE_CLASS_CONFIG} \
