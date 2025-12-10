@@ -143,6 +143,7 @@ get_virtctl
 
 REGISTRY_CONFIG=$(mktemp)
 oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${REGISTRY_CONFIG}"
+export REGISTRY_CONFIG
 VIRT_OPERATOR_IMAGE=$(oc get deployment virt-operator -n openshift-cnv -o jsonpath='{.spec.template.spec.containers[0].image}')
 
 # Replace registry server if REGISTRY_SERVER is provided
