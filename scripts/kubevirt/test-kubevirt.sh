@@ -21,11 +21,14 @@ function apply_disk_images_provider() {
         return 0
     fi
     
-    echo "Applying disk-images-provider with KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE}"
+    echo "Applying disk-images-provider with KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE}, REGISTRY_SERVER=${REGISTRY_SERVER}"
     
-    # Replace the image tag with KUBEVIRT_RELEASE and apply
-    sed "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g" "${yaml_file}" | \
-        oc apply -f -
+    # Replace the image tag with KUBEVIRT_RELEASE and optionally registry with REGISTRY_SERVER, then apply
+    local sed_args=(-e "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g")
+    if [ "${REGISTRY_SERVER}" != "quay.io" ]; then
+        sed_args+=(-e "s|quay.io|${REGISTRY_SERVER}|g")
+    fi
+    sed "${sed_args[@]}" "${yaml_file}" | oc apply -f -
     
     if [ $? -eq 0 ]; then
         DISK_IMAGES_PROVIDER_APPLIED=true
@@ -46,8 +49,11 @@ function cleanup_disk_images_provider() {
         local yaml_file="${SCRIPT_DIR}/testing-infra/disk-images-provider.yaml"
         if [ -f "${yaml_file}" ]; then
             # Use the same substitution and delete
-            sed "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g" "${yaml_file}" | \
-                oc delete -f - --ignore-not-found=true
+            local sed_args=(-e "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g")
+            if [ "${REGISTRY_SERVER}" != "quay.io" ]; then
+                sed_args+=(-e "s|quay.io|${REGISTRY_SERVER}|g")
+            fi
+            sed "${sed_args[@]}" "${yaml_file}" | oc delete -f - --ignore-not-found=true
             echo "disk-images-provider resources deleted"
         fi
         DISK_IMAGES_PROVIDER_APPLIED=false
