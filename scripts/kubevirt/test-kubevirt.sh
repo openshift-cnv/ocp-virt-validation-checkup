@@ -181,6 +181,16 @@ if [ -f "${STORAGE_CONFIG_PATH}" ]; then
     label_filter_joined="${label_filter_joined}&&(!RequiresBlockStorage)"
     echo "Block storage not supported, added (!RequiresBlockStorage) filter"
   fi
+
+  # Check if storageRWOFileSystem storage class has WaitForFirstConsumer binding mode
+  STORAGE_RWO_FS=$(jq -r '.storageRWOFileSystem // empty' "${STORAGE_CONFIG_PATH}")
+  if [ -n "${STORAGE_RWO_FS}" ]; then
+    VOLUME_BINDING_MODE=$(oc get storageclass "${STORAGE_RWO_FS}" -o jsonpath='{.volumeBindingMode}' 2>/dev/null || echo "")
+    if [ "${VOLUME_BINDING_MODE}" != "WaitForFirstConsumer" ]; then
+      label_filter_joined="${label_filter_joined}&&(!RequiresWFFCStorageClass)"
+      echo "Storage class ${STORAGE_RWO_FS} does not have WaitForFirstConsumer binding mode, added (!RequiresWFFCStorageClass) filter"
+    fi
+  fi
 fi
 
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
