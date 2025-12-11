@@ -448,13 +448,27 @@ fi
 COMPLETION_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo ${COMPLETION_TIMESTAMP} > ${RESULTS_DIR}/completionTimestamp
 
+# Stop progress watcher before summarizing results
+if [[ -n "${PROGRESS_WATCHER_PID}" ]] && kill -0 "${PROGRESS_WATCHER_PID}" 2>/dev/null; then
+    echo "Stopping progress watcher (PID: ${PROGRESS_WATCHER_PID})..."
+    kill "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
+    wait "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
+    echo "Progress watcher stopped."
+fi
+
+# Clean up .dry-run directory if it still exists (used by progress_watcher for test discovery)
+if [ -d "${RESULTS_DIR}/.dry-run" ]; then
+    echo "Cleaning up .dry-run directory..."
+    rm -rf "${RESULTS_DIR}/.dry-run"
+fi
+
 # =========
 # Summarize
 # =========
 junit_parser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt
 
-# Archive test results into tar.gz
-tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} .
+# Archive test results into tar.gz (exclude .dry-run directory as a defensive measure)
+tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} --exclude='.dry-run' .
 mv /tmp/test-results-${TIMESTAMP}.tar.gz ${RESULTS_DIR}/test-results-${TIMESTAMP}.tar.gz
 
 echo "Self Validation test run is done."
