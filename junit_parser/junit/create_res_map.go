@@ -37,6 +37,11 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 			continue
 		}
 
+		// Skip the .dry-run directory (used by progress_watcher for test discovery)
+		if entry.Name() == ".dry-run" {
+			continue
+		}
+
 		wg.Add(1)
 
 		go func(sig string) {
