@@ -236,6 +236,86 @@ In order to see which tests are going to be run, without actually executing them
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e DRY_RUN=true ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 
+## Disconnected Environments
+The validation checkup can be run on disconnected (air-gapped) OpenShift clusters by using a mirror registry. This section explains how to configure the checkup for disconnected environments.
+
+### Prerequisites for Disconnected Environments
+1. A mirror registry that contains all the required images
+2. The cluster must be configured to pull images from the mirror registry
+
+### Using the REGISTRY_SERVER Parameter
+The `REGISTRY_SERVER` environment variable allows you to specify a custom mirror registry that replaces the default public registries (`registry.redhat.io`, `quay.io`, `ghcr.io`) used by the validation checkup.
+
+Example:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e REGISTRY_SERVER=my-mirror-registry.example.com:5000 ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+
+This will configure the Job to use your mirror registry for all image pulls:
+```yaml
+apiVersion: batch/v1
+kind: Job
+spec:
+  template:
+    spec:
+      containers:
+        - name: ocp-virt-validation-checkup
+          env:
+            - name: REGISTRY_SERVER
+              value: my-mirror-registry.example.com:5000
+```
+
+### Mirror Registry Configuration
+The mirror registry server **must be configured to allow image pulls without authentication** from within the cluster. The validation checkup relies on unauthenticated access to pull images from the mirror registry during test execution.
+
+### Certificate Configuration
+The cluster must trust the mirror registry's TLS certificate to avoid `x509: certificate signed by unknown authority` errors.
+
+#### Option 1: Add the Registry Certificate to the Cluster (Recommended)
+Add your mirror registry's CA certificate to the cluster's trusted CA bundle:
+
+1. Create a ConfigMap containing the registry's CA certificate:
+```bash
+$ oc create configmap registry-ca \
+    --from-file=my-mirror-registry.example.com..5000=/path/to/ca-certificate.crt \
+    -n openshift-config
+```
+
+2. Update the cluster's image configuration to use the ConfigMap:
+```bash
+$ oc patch image.config.openshift.io/cluster --patch '{"spec":{"additionalTrustedCA":{"name":"registry-ca"}}}' --type=merge
+```
+
+#### Option 2: Configure the Registry as Insecure
+If you cannot add the certificate to the cluster, you can configure the registry as insecure. **This is not recommended for production environments.**
+
+Add your mirror registry to the `registrySources.insecureRegistries` list in the cluster's image configuration:
+```bash
+$ oc patch image.config.openshift.io/cluster --type=merge --patch '
+{
+  "spec": {
+    "registrySources": {
+      "insecureRegistries": [
+        "my-mirror-registry.example.com:5000"
+      ]
+    }
+  }
+}'
+```
+
+**Note:** After modifying the image configuration, the Machine Config Operator will roll out changes to all nodes. Wait for the rollout to complete before running the validation checkup:
+```bash
+$ oc wait machineconfigpool --all --for=condition=Updated --timeout=30m
+```
+
+### Mirroring Required Images
+Ensure that all images used by the validation checkup are mirrored to your registry. The primary images that need to be mirrored include:
+- The OpenShift Virtualization related images (from `registry.redhat.io`)
+- KubeVirt utility container images (from `quay.io/kubevirt`)
+- The `astral-sh/uv` image (from `ghcr.io`) for tier2 tests
+
+You can use the `oc adm catalog mirror` or `oc image mirror` commands to mirror these images to your disconnected registry.
+
 
 ## Retrieve Checkup Results
 The checkup results are available both in the form of a summary, and a browsable detailed results.
