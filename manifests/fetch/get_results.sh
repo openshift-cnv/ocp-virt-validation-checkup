@@ -20,6 +20,14 @@ else
   PVC_CLAIM_NAME="ocp-virt-validation-pvc-${TIMESTAMP}"
 fi
 
+# Determine nginx image: use REGISTRY_SERVER if provided, otherwise use default
+NGINX_IMAGE_PATH="rhel9/nginx-124:latest"
+if [ -n "${REGISTRY_SERVER}" ]; then
+  NGINX_IMAGE="${REGISTRY_SERVER}/${NGINX_IMAGE_PATH}"
+else
+  NGINX_IMAGE="registry.redhat.io/${NGINX_IMAGE_PATH}"
+fi
+
 # Get job name and UID from the ConfigMap's owner reference
 # The ConfigMap should already have the job as its owner
 CONFIGMAP_TO_CHECK="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
@@ -139,7 +147,7 @@ metadata:
   }${OWNER_REFERENCE}
 spec:
   containers:
-    - image: registry.redhat.io/rhel9/nginx-124:latest
+    - image: ${NGINX_IMAGE}
       name: pod
       command:
         - "sh"

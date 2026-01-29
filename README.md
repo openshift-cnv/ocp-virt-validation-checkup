@@ -265,6 +265,11 @@ spec:
               value: my-mirror-registry.example.com:5000
 ```
 
+When retrieving checkup results, you should also pass the `REGISTRY_SERVER` parameter so that the nginx pod used to serve results is pulled from your mirror registry:
+```bash
+$ podman run -e TIMESTAMP=${TIMESTAMP} -e REGISTRY_SERVER=my-mirror-registry.example.com:5000 ${OCP_VIRT_VALIDATION_IMAGE} get_results | oc apply -f -
+```
+
 ### Mirror Registry Configuration
 The mirror registry server **must be configured to allow image pulls without authentication** from within the cluster. The validation checkup relies on unauthenticated access to pull images from the mirror registry during test execution.
 
@@ -313,6 +318,7 @@ Ensure that all images used by the validation checkup are mirrored to your regis
 - The OpenShift Virtualization related images (from `registry.redhat.io`)
 - KubeVirt utility container images (from `quay.io/kubevirt`)
 - The `astral-sh/uv` image (from `ghcr.io`) for tier2 tests
+- The nginx image `rhel9/nginx-124:latest` (from `registry.redhat.io`) for viewing detailed results
 
 You can use the `oc adm catalog mirror` or `oc image mirror` commands to mirror these images to your disconnected registry.
 
