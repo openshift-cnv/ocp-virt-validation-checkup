@@ -165,6 +165,20 @@ then
 fi
 if [ -z "${KUBEVIRT_TAG}" ]
 then
+  # Try quay.io/openshift-virtualization/konflux-builds path as fallback
+  CSV_VERSION=$(oc get csv -n openshift-cnv -o json | jq -r '.items[] | select(.metadata.name | startswith("kubevirt-hyperconverged")).spec.version')
+  if [ -n "${CSV_VERSION}" ]; then
+    # Convert version like 4.21.0 to v4-21
+    KONFLUX_VERSION="v$(echo ${CSV_VERSION} | cut -d. -f1)-$(echo ${CSV_VERSION} | cut -d. -f2)"
+    # Extract image name and digest/tag from the original virt-operator image (e.g., virt-operator-rhel9@sha256:...)
+    IMAGE_NAME_WITH_DIGEST=$(echo "${VIRT_OPERATOR_IMAGE}" | sed 's|.*/||')
+    KONFLUX_IMAGE="quay.io/openshift-virtualization/konflux-builds/${KONFLUX_VERSION}/${IMAGE_NAME_WITH_DIGEST}"
+    echo "Trying konflux-builds fallback: ${KONFLUX_IMAGE}"
+    KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${KONFLUX_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
+  fi
+fi
+if [ -z "${KUBEVIRT_TAG}" ]
+then
   echo "Error: could not get kubevirt tag from virt-operator image."
   exit 1
 fi
