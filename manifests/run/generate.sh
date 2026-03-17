@@ -130,6 +130,7 @@ roleRef:
 EOF
 
 # PVC (to store the results)
+# cdi.kubevirt.io/applyStorageProfile: "true" lets CDI apply StorageProfile so requested size is raised to the CSI driver minimum when smaller.
 cat <<EOF
 ---
 apiVersion: v1
@@ -139,6 +140,7 @@ metadata:
   namespace: ocp-virt-validation
   labels:
     app: ocp-virt-validation
+    cdi.kubevirt.io/applyStorageProfile: "true"
 spec:
   accessModes:
     - ReadWriteOnce
