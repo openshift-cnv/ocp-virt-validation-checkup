@@ -37,35 +37,14 @@ cd /openshift-virtualization-tests
 # Set default registry server if not provided
 REGISTRY_SERVER="${REGISTRY_SERVER:-ghcr.io}"
 
-# Configure for disconnected environments
-# If REGISTRY_SERVER is set (indicating disconnected environment), use local PyPI mirror and insecure flag
 INSECURE_FLAG=""
 REGISTRY_AUTH=""
 if [ -n "${REGISTRY_SERVER}" ] && [ "${REGISTRY_SERVER}" != "ghcr.io" ]; then
-    export UV_INDEX_URL="${UV_INDEX_URL:-http://pypi-mirror.pypi-mirror.svc.cluster.local:8080/simple/}"
-    # Force uv to use system Python instead of downloading from GitHub
-    export UV_PYTHON_PREFERENCE=only-system
     INSECURE_FLAG="--insecure=true"
     if [ -n "${REGISTRY_CONFIG}" ]; then
         REGISTRY_AUTH="-a ${REGISTRY_CONFIG}"
     fi
-    echo "Using custom PyPI index: ${UV_INDEX_URL}"
-    echo "Using system Python (UV_PYTHON_PREFERENCE=only-system)"
 fi
-
-# Check if uv binaries already exist to avoid re-extraction
-if [ ! -f "./uv" ] || [ ! -f "./uvx" ]; then
-    echo "Extracting uv binaries from ${REGISTRY_SERVER}/astral-sh/uv:latest..."
-    oc image extract ${REGISTRY_AUTH} ${INSECURE_FLAG} ${REGISTRY_SERVER}/astral-sh/uv:latest --file /uv,/uvx
-    chmod +x uv uvx
-else
-    echo "uv binaries already exist, skipping extraction"
-fi
-
-# Sync dependencies (uses UV_INDEX_URL if set, otherwise default PyPI)
-echo "Syncing dependencies..."
-./uv sync --locked
-./uv export --no-hashes
 
 export ARTIFACTS=${RESULTS_DIR}/tier2
 mkdir -p "${ARTIFACTS}"
@@ -211,7 +190,7 @@ grep -A 3 "oc image" utilities/virt.py
 
 echo "Starting tier2 tests 🧪"
 
-./uv run pytest \
+.venv/bin/pytest \
   -m "conformance" \
   -W "ignore::pytest.PytestRemovedIn9Warning" \
   --skip-artifactory-check \
