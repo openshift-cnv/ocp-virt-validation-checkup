@@ -188,6 +188,11 @@ fi
 
 grep -A 3 "oc image" utilities/virt.py
 
+SKIP_ARGS=()
+if [ -n "${TEST_SKIPS}" ]; then
+  SKIP_ARGS=(-k "not ($(echo "${TEST_SKIPS}" | sed 's/|/ or /g'))")
+fi
+
 echo "Starting tier2 tests 🧪"
 
 .venv/bin/pytest \
@@ -201,6 +206,7 @@ echo "Starting tier2 tests 🧪"
   ${HCP_FLAG} \
   -s -o log_cli=true \
   ${DRY_RUN_FLAG} \
+  "${SKIP_ARGS[@]}" \
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
@@ -212,3 +218,35 @@ echo "Tier2 test process started with PID: ${TEST_PID}"
 
 # Wait for the test to complete
 wait ${TEST_PID} || true
+
+# Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
+# since pytest -k deselection omits them from the report entirely.
+# Only count entries that match real conformance test names.
+if [ -n "${TEST_SKIPS}" ]; then
+  .venv/bin/python -c "
+import subprocess, sys, xml.etree.ElementTree as ET
+
+junit_path = sys.argv[1]
+skip_entries = sys.argv[2].split('|')
+
+# Collect all conformance test node IDs (without running them)
+result = subprocess.run(
+    ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+    capture_output=True, text=True
+)
+collected = result.stdout
+
+matched = [e for e in skip_entries if e in collected]
+skipped_names = ', '.join(matched) if matched else '(none)'
+ignored = [e for e in skip_entries if e not in collected]
+if ignored:
+    print(f'TEST_SKIPS entries not matching any conformance test (ignored): {ignored}')
+print(f'Matched {len(matched)} real test(s) to mark as skipped: {skipped_names}')
+
+if matched:
+    tree = ET.parse(junit_path)
+    for ts in tree.iter('testsuite'):
+        ts.set('skipped', str(int(ts.get('skipped', '0')) + len(matched)))
+    tree.write(junit_path, xml_declaration=True, encoding='unicode')
+" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}"
+fi
