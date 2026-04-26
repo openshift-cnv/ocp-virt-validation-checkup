@@ -2,7 +2,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: pvcreader
-  namespace: cnv-cert
+  namespace: ocp-virt-validation
 spec:
   path: /
   port:

@@ -4,7 +4,7 @@ metadata:
   labels:
     app: pvc-reader
   name: pvc-reader-$(date +%s)
-  namespace: cnv-cert
+  namespace: ocp-virt-validation
 spec:
   containers:
     - image: registry.redhat.io/rhel9/nginx-124:latest
@@ -28,7 +28,7 @@ spec:
         claimName: ${PVC_NAME}
     - name: conf
       configMap:
-        name: nginx-conf
+        name: pvc-reader-nginx-conf
         items:
           - key: nginx.conf
             path: nginx.conf
