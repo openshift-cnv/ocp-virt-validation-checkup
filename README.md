@@ -393,7 +393,7 @@ The command output would look similar to:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nginx-conf
+  name: pvc-reader-nginx-conf
   namespace: ocp-virt-validation
 data:
   nginx.conf: |-
@@ -466,7 +466,7 @@ spec:
         claimName: ocp-virt-validation-pvc-20250518-112311
     - name: conf
       configMap:
-        name: nginx-conf
+        name: pvc-reader-nginx-conf
         items:
           - key: nginx.conf
             path: nginx.conf
@@ -512,7 +512,7 @@ spec:
 **Note:** You can apply the manifests directly from the command, using:
 ```bash
 $ podman run -e TIMESTAMP=${TIMESTAMP} ${OCP_VIRT_VALIDATION_IMAGE} get_results | oc apply -f -
-configmap/nginx-conf created
+configmap/pvc-reader-nginx-conf created
 pod/pvc-reader-20250518-112311 created
 service/pvc-reader created
 route.route.openshift.io/pvcreader created
