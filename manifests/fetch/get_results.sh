@@ -62,7 +62,7 @@ cat <<EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nginx-conf
+  name: pvc-reader-nginx-conf
   namespace: ${NAMESPACE}${OWNER_REFERENCE:+
   }${OWNER_REFERENCE}
 data:
@@ -168,7 +168,7 @@ spec:
         claimName: ${PVC_CLAIM_NAME}
     - name: conf
       configMap:
-        name: nginx-conf
+        name: pvc-reader-nginx-conf
         items:
           - key: nginx.conf
             path: nginx.conf
