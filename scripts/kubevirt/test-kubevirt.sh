@@ -174,8 +174,14 @@ else
   exit 1
 fi
 
-# Check storage configuration and modify label filter if block storage is not supported
+# Check storage configuration and modify label filter based on available capabilities
 if [ -f "${STORAGE_CONFIG_PATH}" ]; then
+  # Check if storageRWXBlock is missing from the config
+  if ! grep -q '"storageRWXBlock"' "${STORAGE_CONFIG_PATH}"; then
+    label_filter_joined="${label_filter_joined}&&(!RequiresRWXBlock)"
+    echo "RWX block storage not configured, added (!RequiresRWXBlock) filter"
+  fi
+
   # Check if both storageRWOBlock and storageRWXBlock are missing from the config
   if ! grep -q '"storageRWOBlock"' "${STORAGE_CONFIG_PATH}" && ! grep -q '"storageRWXBlock"' "${STORAGE_CONFIG_PATH}"; then
     label_filter_joined="${label_filter_joined}&&(!RequiresBlockStorage)"
