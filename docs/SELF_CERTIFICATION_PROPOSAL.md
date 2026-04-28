@@ -44,19 +44,25 @@ Quick diagnostic checks (not E2E tests).
 
 ## Identified Gaps
 
-Core positive functionality NOT currently tested:
+Core functionality needed to prove "storage works well for virtualization":
 
 | # | Capability | Self-Validation | Storage Checkup | Impact |
 |---|------------|-----------------|-----------------|--------|
-| 1 | **Volume Expansion** | ❌ | ❌ | Cannot verify storage supports disk expansion |
-| 2 | **Storage Migration** | ❌ | ❌ | Cannot verify data can move between volumes |
+| 1 | **Volume Expansion** | ❌ | ❌ | Cannot verify storage supports disk growth |
+| 2 | **Storage Migration** | ❌ | ❌ | Cannot verify data moves between volumes |
 | 3 | **Hotplug Persistence** | ❌ | ❌ | Cannot verify hotplug survives VM restart |
+| 4 | **Block Storage Hotplug** | ⚠️ Partial | ❌ | Block mode hotplug not fully validated |
+| 5 | **Cross-mode Migration** | ❌ | ❌ | Block↔Filesystem migration not tested |
+| 6 | **Multi-volume Operations** | ⚠️ Partial | ❌ | Multiple disks not explicitly tested |
+| 7 | **Data Integrity** | ⚠️ Partial | ❌ | Write/read verification limited |
 
 ---
 
 ## Proposed Additions
 
-### Add 3 Tests to Self-Validation
+### Add 7 Tests to Self-Validation
+
+#### Priority 1: Core Storage Features (Must Have)
 
 | # | Test Name | File Location | Current Labels | Proposed Change |
 |---|-----------|---------------|----------------|-----------------|
@@ -64,29 +70,46 @@ Core positive functionality NOT currently tested:
 | 2 | "should migrate the source volume from a source DV to a destination DV" | `tests/storage/migration.go:374` | None | Add `StorageCritical` |
 | 3 | "should permanently add hotplug volume when added to VM" | `tests/storage/hotplug.go:1162` | `Quarantine` | Remove `Quarantine`, Add `StorageCritical` |
 
-### Why These Tests?
+#### Priority 2: Storage Mode Coverage (Important)
 
-| Test | What It Proves |
-|------|----------------|
-| **Volume Expansion** | Storage infrastructure supports growing VM disks - core feature for production workloads |
-| **Storage Migration** | Data can be moved between volumes - essential for maintenance and upgrades |
-| **Hotplug Persistence** | Hotplug configuration survives VM restart - proves feature works end-to-end |
+| # | Test Name | File Location | Current Labels | Proposed Change |
+|---|-----------|---------------|----------------|-----------------|
+| 4 | "should migrate the source volume from a block source and filesystem destination DVs" | `tests/storage/migration.go:604` | `RequiresBlockStorage` | Add `StorageCritical` |
+| 5 | "should be able to add and remove volumes" (block entries) | `tests/storage/hotplug.go` | `RequiresBlockStorage` | Add `StorageCritical` |
+
+#### Priority 3: Multi-Volume & Data Integrity (Recommended)
+
+| # | Test Name | File Location | Current Labels | Proposed Change |
+|---|-----------|---------------|----------------|-----------------|
+| 6 | "Should be able to add and remove multiple volumes" | `tests/storage/hotplug.go:1059` | None | Add `StorageCritical` |
+| 7 | "should successfully write and read data" (block) | `tests/storage/storage.go` | `RequiresBlockStorage` | Add `StorageCritical` |
+
+### What Each Test Proves
+
+| # | Test | What It Proves for Virtualization |
+|---|------|-----------------------------------|
+| 1 | **Volume Expansion** | Storage supports growing VM disks - essential for production workloads |
+| 2 | **Storage Migration** | Data can move between volumes - needed for maintenance/upgrades |
+| 3 | **Hotplug Persistence** | Hotplug config survives restart - proves feature is production-ready |
+| 4 | **Block↔FS Migration** | Both storage modes can migrate - proves flexibility |
+| 5 | **Block Hotplug** | Block storage works for dynamic attachment - validates block mode |
+| 6 | **Multi-volume** | Multiple disks work together - proves real-world scenarios |
+| 7 | **Data Integrity** | Written data reads correctly - fundamental storage guarantee |
 
 ### What We're NOT Adding
 
 | Category | Reason |
 |----------|--------|
 | Negative test cases | Not proving infrastructure works |
-| Edge cases | Not core functionality |
 | Scale tests (75 volumes) | Impractical for user self-certification |
-| Timing/performance tests | Storage checkup handles basic validation |
-| 4-disk specific tests | 1-2 disks proves the concept works |
+| Timing/performance tests | Not core functionality validation |
+| Edge cases / error handling | Focus is on positive validation |
 
 ---
 
 ## Combined Self-Certification Coverage
 
-After proposed additions:
+After proposed additions (7 tests):
 
 | Core Capability | Self-Validation | Storage Checkup | Combined |
 |-----------------|-----------------|-----------------|----------|
@@ -101,6 +124,18 @@ After proposed additions:
 | **Volume Expansion** | ✅ (new) | ❌ | ✅ |
 | **Storage Migration** | ✅ (new) | ❌ | ✅ |
 | **Hotplug Persistence** | ✅ (new) | ❌ | ✅ |
+| **Block↔FS Migration** | ✅ (new) | ❌ | ✅ |
+| **Block Hotplug** | ✅ (new) | ❌ | ✅ |
+| **Multi-volume Ops** | ✅ (new) | ❌ | ✅ |
+| **Data Integrity** | ✅ (new) | ❌ | ✅ |
+
+### Summary of Changes
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Tests in Self-Validation | ~25 | ~32 |
+| Core capabilities covered | 11 | 18 |
+| Storage modes validated | Filesystem | Filesystem + Block |
 
 ---
 
