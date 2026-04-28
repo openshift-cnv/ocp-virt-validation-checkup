@@ -4,7 +4,7 @@
 
 Create a self-certification suite that proves storage infrastructure works well for virtualization, enabling cloud providers to validate their environment without Red Hat running tests.
 
-**Guiding Principle (from @ngavrilo):**
+**Guiding Principle :**
 > "Our goal is to include tests in the self validation suite that cover what we believe is important, tests that check that the infrastructure, cloud and provided storage functions well and supports virtualization. Not simply running as much tests as possible, nor testing negative cases for features."
 
 ---
