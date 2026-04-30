@@ -211,7 +211,7 @@ It("should migrate the source volume from a source DV to a destination DV", deco
 | Topic | Question |
 |-------|----------|
 | **Windows VM** | Is Windows storage testing required? |
-| **Scale limits** | Is 75 volumes test practical for users? |
+
 
 ---
 
