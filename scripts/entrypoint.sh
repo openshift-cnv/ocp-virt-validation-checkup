@@ -479,10 +479,16 @@ fi
 # =========
 # Summarize
 # =========
-junit_parser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt
+PARSER_EXIT=0
+junit_parser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt || PARSER_EXIT=$?
 
 # Archive test results into tar.gz (exclude .dry-run directory as a defensive measure)
 tar -czf /tmp/test-results-${TIMESTAMP}.tar.gz -C ${RESULTS_DIR} --exclude='.dry-run' .
 mv /tmp/test-results-${TIMESTAMP}.tar.gz ${RESULTS_DIR}/test-results-${TIMESTAMP}.tar.gz
+
+if [ ${PARSER_EXIT} -ne 0 ]; then
+  echo "Self Validation test run finished with errors (setup failure detected, no ConfigMap created)."
+  exit 1
+fi
 
 echo "Self Validation test run is done."

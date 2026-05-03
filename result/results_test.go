@@ -130,6 +130,61 @@ func TestMarshalsResultToJSONCorrectly(t *testing.T) {
 	}
 }
 
+func TestSetupFailureExcludesSuiteFromResults(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"compute": {
+			Tests:        63,
+			Failures:     0,
+			Errors:       0,
+			SetupFailure: true,
+		},
+	}
+
+	res := result.New(junitResults)
+
+	if !res.SetupFailure {
+		t.Error("expected SetupFailure to be true")
+	}
+	if len(res.SigMap) != 0 {
+		t.Errorf("expected 0 sigs (setup failure should be excluded), got %d", len(res.SigMap))
+	}
+	if res.Summary.Run != 0 {
+		t.Errorf("expected 0 total tests run, got %d", res.Summary.Run)
+	}
+}
+
+func TestSetupFailureWithOtherValidSuites(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"compute": {
+			Tests:        63,
+			Failures:     0,
+			SetupFailure: true,
+		},
+		"storage": {
+			Tests:    10,
+			Failures: 1,
+			TestCases: []junit.TestCase{
+				{Name: "test1", Failure: true},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+
+	if !res.SetupFailure {
+		t.Error("expected SetupFailure to be true")
+	}
+	if len(res.SigMap) != 1 {
+		t.Errorf("expected 1 sig (only storage), got %d", len(res.SigMap))
+	}
+	if _, ok := res.SigMap["storage"]; !ok {
+		t.Error("expected storage suite in results")
+	}
+	if res.Summary.Run != 10 {
+		t.Errorf("expected 10 total tests run, got %d", res.Summary.Run)
+	}
+}
+
 func TestConvertsResultToYAMLCorrectly(t *testing.T) {
 	junitResults := map[string]junit.TestSuite{
 		"sig1": {
