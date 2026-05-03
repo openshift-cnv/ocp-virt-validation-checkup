@@ -207,7 +207,7 @@ if [ "${SIG}" == "storage" ] && [ -z "${DRY_RUN_FLAG}" ]; then
 fi
 
 echo "Starting ${SIG} tests 🧪"
-${TESTS_BINARY} \
+(set +e; ${TESTS_BINARY} \
     -cdi-namespace="$TARGET_NAMESPACE" \
     -config="${STORAGE_CONFIG_PATH}" \
     -installed-namespace="$TARGET_NAMESPACE" \
@@ -226,7 +226,7 @@ ${TESTS_BINARY} \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
-    "${skip_arg}" 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt &
+    "${skip_arg}"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt &
 
 # Store the PID for cleanup
 TEST_PID=$!
