@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -46,11 +48,20 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 
 		go func(sig string) {
 			defer wg.Done()
+			exitCode := readExitCode(path.Join(dir, sig, ".exit_code"))
+
 			fileName := path.Join(dir, sig, junitFileName)
 			junitResult, err := readOneFile(fileName)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
+				if exitCode != 0 {
+					ch <- resultWithSig{sig: sig, junitResult: TestSuite{SetupFailure: true}}
+				}
 				return
+			}
+
+			if exitCode != 0 && junitResult.Failures == 0 && junitResult.Errors == 0 {
+				junitResult.SetupFailure = true
 			}
 
 			ch <- resultWithSig{sig: sig, junitResult: junitResult}
@@ -68,6 +79,18 @@ func NewResultMap(dir string) (map[string]TestSuite, error) {
 	}
 
 	return junitResults, nil
+}
+
+func readExitCode(filePath string) int {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return 0
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	return code
 }
 
 func readOneFile(fileName string) (TestSuite, error) {

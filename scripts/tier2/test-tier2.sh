@@ -195,7 +195,7 @@ fi
 
 echo "Starting tier2 tests 🧪"
 
-.venv/bin/pytest \
+(set +e; .venv/bin/pytest \
   -m "conformance" \
   -W "ignore::pytest.PytestRemovedIn9Warning" \
   --skip-artifactory-check \
@@ -210,7 +210,7 @@ echo "Starting tier2 tests 🧪"
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml" 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
+  --junitxml="${ARTIFACTS}/junit.results.xml"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
 
 # Store the PID for cleanup
 TEST_PID=$!
