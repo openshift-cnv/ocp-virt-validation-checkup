@@ -474,8 +474,8 @@ func TestSuiteDurationTracking(t *testing.T) {
 	// Wait a bit to ensure duration is measurable
 	time.Sleep(10 * time.Millisecond)
 
-	// Finish the suite
-	processSuiteLine(suite, "Ran 5 specs in 1.2 seconds")
+	// Finish the suite using the actual Ginkgo summary format
+	processSuiteLine(suite, "Ran 5 of 10 Specs in 1.2 seconds")
 
 	// Verify suite is finished
 	if !suite.Finished {
@@ -1164,22 +1164,49 @@ func TestSuiteFinishingDetection(t *testing.T) {
 			description:    "Suite should be marked finished when completed equals total",
 		},
 		{
-			name: "Ginkgo completion by pattern",
+			name: "Ginkgo completion by Ran pattern",
 			inputLines: []string{
-				"Ran 10 specs in 5.2 seconds",
+				"Ran 10 of 50 Specs in 42.5 seconds",
 			},
 			initialSuite:   TestSuite{Name: "compute", Total: 10, Completed: 8, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "compute", Total: 10, Completed: 8, Finished: true},
-			description:    "Suite should be marked finished by completion pattern",
+			description:    "Suite should be marked finished by Ginkgo Ran pattern",
 		},
 		{
-			name: "Pytest completion pattern",
+			name: "Ginkgo completion by FAIL status",
 			inputLines: []string{
-				"short test summary info - 5 passed, 2 failed in 3.45 seconds",
+				"FAIL! -- 9 Passed | 2 Failed | 4 Pending | 1414 Skipped",
+			},
+			initialSuite:   TestSuite{Name: "network", Total: 18, Completed: 11, Finished: false, StartTime: time.Now()},
+			expectedResult: TestSuite{Name: "network", Total: 18, Completed: 11, Finished: true},
+			description:    "Suite should be marked finished by Ginkgo FAIL! status line",
+		},
+		{
+			name: "Pytest completion by summary info",
+			inputLines: []string{
+				"short test summary info",
 			},
 			initialSuite:   TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: false, StartTime: time.Now()},
 			expectedResult: TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: true},
-			description:    "Suite should be marked finished by pytest pattern",
+			description:    "Suite should be marked finished by pytest summary pattern",
+		},
+		{
+			name: "Pytest completion by final line",
+			inputLines: []string{
+				"====== 5 passed, 2 failed in 3.45 seconds ======",
+			},
+			initialSuite:   TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: false, StartTime: time.Now()},
+			expectedResult: TestSuite{Name: "tier2", Total: 7, Completed: 6, Finished: true},
+			description:    "Suite should be marked finished by pytest final results line",
+		},
+		{
+			name: "VM console output should NOT trigger finish",
+			inputLines: []string{
+				`  [32mMatch for RE:[39m "cat /var/log/cloud-init\.log" found: Ran 8 modules with 0 failures. Up 8.34 seconds.`,
+			},
+			initialSuite:   TestSuite{Name: "network", Total: 18, Completed: 0, Finished: false, StartTime: time.Now()},
+			expectedResult: TestSuite{Name: "network", Total: 18, Completed: 0, Finished: false},
+			description:    "VM console output containing 'Ran' should not trigger finish",
 		},
 		{
 			name: "No completion yet",

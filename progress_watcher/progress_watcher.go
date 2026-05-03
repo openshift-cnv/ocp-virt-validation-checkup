@@ -39,6 +39,14 @@ var (
 	pytestRegex = regexp.MustCompile(`collected \d+ items / \d+ deselected / (\d+) selected`)
 	// Fallback for when there are no deselected tests: "collected X items"
 	pytestRegexSimple = regexp.MustCompile(`collected (\d+) items$`)
+	// Ginkgo final summary: "Ran X of Y Specs in Z seconds" (case-insensitive for specs/Specs)
+	ginkgoRanRegex = regexp.MustCompile(`(?i)^Ran \d+.+[Ss]pecs? in .+seconds?`)
+	// Ginkgo final status: "FAIL! -- X Passed | Y Failed" or "PASS! -- X Passed | Y Failed"
+	ginkgoStatusRegex = regexp.MustCompile(`^(PASS|FAIL)! -- \d+ Passed \|`)
+	// Pytest short test summary info (with or without = borders)
+	pytestSummaryRegex = regexp.MustCompile(`(?:=+ )?short test summary info`)
+	// Pytest final line: "X passed, Y failed in Z seconds" or "= X passed in Z seconds ="
+	pytestFinalRegex = regexp.MustCompile(`\d+ passed.* in .+seconds?`)
 	// Global logger for progress output
 	logger  *log.Logger
 	logFile *os.File
@@ -749,39 +757,9 @@ func processSuiteLine(suite *TestSuite, line string) {
 		}
 	}
 
-	// Check for suite completion indicators
+	// Check for completed tests BEFORE checking for suite finish
+	// (ensures completions on the same line batch as finish are counted)
 	if !suite.Finished {
-		// Common completion patterns that indicate the suite has finished
-		finishPatterns := []string{
-			"Ran ",                    // Ginkgo final summary
-			"short test summary info", // Pytest session summary
-			"PASS:",                   // Final pass/fail status
-			"FAIL:",                   // Final pass/fail status
-			"tests completed",         // Generic completion
-		}
-
-		for _, pattern := range finishPatterns {
-			if strings.Contains(line, pattern) && (strings.Contains(line, "second") ||
-				strings.Contains(line, "passed") || strings.Contains(line, "failed") ||
-				strings.Contains(line, "complete")) {
-				suite.Finished = true
-				suite.EndTime = time.Now()
-				logger.Printf("[%s] Suite finished in %v (pattern: %s, line: %q)\n",
-					suite.Name, suite.EndTime.Sub(suite.StartTime), pattern, line)
-				break
-			}
-		}
-
-		// Also check if we've reached total completion
-		if suite.Total > 0 && suite.Completed >= suite.Total {
-			suite.Finished = true
-			suite.EndTime = time.Now()
-			logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
-		}
-	}
-
-	// Check for completed tests and track pass/fail status
-	if !suite.Finished { // Only count new completions if not finished
 		if strings.HasPrefix(line, "•") { // Ginkgo test completion
 			if *verbose {
 				logger.Printf("[%s] DEBUG: Found bullet point: %q\n", suite.Name, line)
@@ -838,44 +816,42 @@ func processSuiteLine(suite *TestSuite, line string) {
 		}
 	}
 
-	// Check for standalone Ginkgo failure indicators (F, S for fail/skip) - only when not finished
-	// Note: These are summary/status lines, not individual test results
-	if !suite.Finished {
-		if strings.HasPrefix(line, "F") || strings.HasPrefix(line, "S") {
-			if *verbose {
-				indicator := "failure"
-				if strings.HasPrefix(line, "S") {
-					indicator = "skip"
-				}
-				logger.Printf("[%s] DEBUG: Found standalone %s indicator line: %q (summary/status, not adjusting counts)\n",
-					suite.Name, indicator, line)
-			}
-			// These are summary indicators, not individual test results
-			// Individual test pass/fail is determined by the • lines themselves
+	// Extract pass/fail counts from summary lines before checking for finish,
+	// so counts are updated even when the summary line also triggers finish.
+	if !suite.Finished && strings.Contains(line, "passed") && strings.Contains(line, "failed") {
+		passRegex := regexp.MustCompile(`(\d+)\s+passed`)
+		failRegex := regexp.MustCompile(`(\d+)\s+failed`)
+
+		if passMatch := passRegex.FindStringSubmatch(line); passMatch != nil {
+			var passCount int
+			fmt.Sscanf(passMatch[1], "%d", &passCount)
+			suite.Passed = passCount
+			logger.Printf("[%s] Updated pass count from summary: %d\n", suite.Name, passCount)
+		}
+
+		if failMatch := failRegex.FindStringSubmatch(line); failMatch != nil {
+			var failCount int
+			fmt.Sscanf(failMatch[1], "%d", &failCount)
+			suite.Failed = failCount
+			logger.Printf("[%s] Updated fail count from summary: %d\n", suite.Name, failCount)
 		}
 	}
 
-	// Additional patterns for pass/fail detection from log summaries - only when not finished
+	// Check for suite completion using precise regexes that only match actual
+	// framework summary lines (not VM console output or embedded log dumps).
 	if !suite.Finished {
-		if strings.Contains(line, "passed") && strings.Contains(line, "failed") {
-			// Try to extract final pass/fail counts from summary lines
-			// Pattern like: "5 passed, 2 failed"
-			passRegex := regexp.MustCompile(`(\d+)\s+passed`)
-			failRegex := regexp.MustCompile(`(\d+)\s+failed`)
+		if ginkgoRanRegex.MatchString(line) || ginkgoStatusRegex.MatchString(line) ||
+			pytestSummaryRegex.MatchString(line) || pytestFinalRegex.MatchString(line) {
+			suite.Finished = true
+			suite.EndTime = time.Now()
+			logger.Printf("[%s] Suite finished in %v (line: %q)\n",
+				suite.Name, suite.EndTime.Sub(suite.StartTime), line)
+		}
 
-			if passMatch := passRegex.FindStringSubmatch(line); passMatch != nil {
-				var passCount int
-				fmt.Sscanf(passMatch[1], "%d", &passCount)
-				suite.Passed = passCount
-				logger.Printf("[%s] Updated pass count from summary: %d\n", suite.Name, passCount)
-			}
-
-			if failMatch := failRegex.FindStringSubmatch(line); failMatch != nil {
-				var failCount int
-				fmt.Sscanf(failMatch[1], "%d", &failCount)
-				suite.Failed = failCount
-				logger.Printf("[%s] Updated fail count from summary: %d\n", suite.Name, failCount)
-			}
+		if suite.Total > 0 && suite.Completed >= suite.Total {
+			suite.Finished = true
+			suite.EndTime = time.Now()
+			logger.Printf("[%s] Suite finished (reached total count) in %v\n", suite.Name, suite.EndTime.Sub(suite.StartTime))
 		}
 	}
 }
