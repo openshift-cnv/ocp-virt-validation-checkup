@@ -366,6 +366,20 @@ else
   fi
 fi
 
+# ======================
+# Windows Golden Image Setup
+# ======================
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo "Setting up Windows golden image for Windows tests..."
+  WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
+  if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
+    export STORAGE_CLASS
+    bash "${WINDOWS_SETUP_SCRIPT}"
+  else
+    echo "Warning: Windows setup script not found at ${WINDOWS_SETUP_SCRIPT}"
+  fi
+fi
+
 # Start progress watcher in background AFTER storage config is set
 echo "Starting progress watcher for multi-suite monitoring..."
 progress_watcher --results-dir="${RESULTS_DIR}" &
