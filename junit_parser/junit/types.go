@@ -19,6 +19,10 @@ type TestSuite struct {
 	Disabled  int        `xml:"disabled,attr"`
 	Time      float64    `xml:"time,attr"`
 	TestCases []TestCase `xml:"testcase"`
+
+	// SetupFailure is set when the test binary exited non-zero but JUnit
+	// reports zero failures, indicating a BeforeSuite or infrastructure error.
+	SetupFailure bool `xml:"-"`
 }
 
 type TestCase struct {

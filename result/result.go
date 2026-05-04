@@ -14,8 +14,9 @@ import (
 
 // Result represents the result of a test run, including a map of test suite results and a summary.
 type Result struct {
-	SigMap  SigMap  `json:",omitempty,inline"`
-	Summary Summary `json:"summary,omitempty"`
+	SigMap       SigMap  `json:",omitempty,inline"`
+	Summary      Summary `json:"summary,omitempty"`
+	SetupFailure bool    `json:"-"`
 }
 
 // New creates a new Result struct from the given map of JUnit test results.
@@ -25,6 +26,12 @@ func New(junitResults map[string]junit.TestSuite) Result {
 	}
 
 	for sig, testSuite := range junitResults {
+		if testSuite.SetupFailure {
+			res.SetupFailure = true
+			fmt.Fprintf(os.Stderr, "Suite %q failed during setup (no tests were executed)\n", sig)
+			continue
+		}
+
 		// Count skipped tests from testsuite header OR individual test cases
 		skipped := testSuite.Skipped + testSuite.Disabled
 
@@ -126,10 +133,12 @@ func (r Result) MarshalJSON() ([]byte, error) {
 	}
 
 	// Combine the two JSON objects
-	var resultJSON []byte
-	if len(sigMapJSON) > 0 {
-		resultJSON = append(sigMapJSON[:len(sigMapJSON)-1], ',')
+	if len(r.SigMap) == 0 {
+		return aliasJSON, nil
 	}
+
+	var resultJSON []byte
+	resultJSON = append(sigMapJSON[:len(sigMapJSON)-1], ',')
 	resultJSON = append(resultJSON, aliasJSON[1:]...) // Remove the opening brace from aliasJSON
 
 	return resultJSON, nil
@@ -138,6 +147,13 @@ func (r Result) MarshalJSON() ([]byte, error) {
 // String implements the Stringer interface for Result, to provide a human-readable summary of the test results.
 func (r Result) String() string {
 	sb := strings.Builder{}
+
+	if r.SetupFailure && len(r.SigMap) == 0 {
+		sb.WriteString("ERROR: No tests were executed. One or more test suites failed during setup.\n")
+		sb.WriteString("Check the test logs for details.\n")
+		return sb.String()
+	}
+
 	for sig, sigRes := range r.SigMap {
 		// Print summary for suite
 		header := "Summary for " + sig
@@ -161,6 +177,10 @@ func (r Result) String() string {
 				sb.WriteString(fmt.Sprintf("  - %s\n", testName))
 			}
 		}
+	}
+
+	if r.SetupFailure {
+		sb.WriteString("\nWARNING: Some test suites failed during setup and were not included in the summary above.\n")
 	}
 
 	header := fmt.Sprintf("Total Summary for execution from %s", os.Getenv("TIMESTAMP"))

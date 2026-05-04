@@ -28,6 +28,14 @@ func main() {
 	}
 
 	testRes := result.New(junitRes)
+
+	fmt.Print(testRes)
+
+	if testRes.SetupFailure && len(testRes.SigMap) == 0 {
+		fmt.Fprintln(os.Stderr, "Skipping ConfigMap creation: no tests were executed due to setup failure")
+		os.Exit(1)
+	}
+
 	resYaml, err := testRes.GetYaml()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to get yaml: %v\n", err)
@@ -35,8 +43,6 @@ func main() {
 	}
 
 	cm, err := configmap.New(cfg, resYaml)
-
-	fmt.Print(testRes)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
