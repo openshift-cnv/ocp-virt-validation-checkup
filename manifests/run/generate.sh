@@ -40,7 +40,6 @@ fi
 
 
 TEST_SKIPS=${TEST_SKIPS:-""}
-REGISTRY_SERVER=${REGISTRY_SERVER:-""}
 
 VALID_SKIP_REGEX='^([a-zA-Z0-9_:|-]+)(\|([a-zA-Z0-9_:|-]+))*$'
 if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
@@ -196,8 +195,6 @@ spec:
               value: ${STORAGE_CLASS}
             - name: STORAGE_CAPABILITIES
               value: ${STORAGE_CAPABILITIES}
-            - name: REGISTRY_SERVER
-              value: ${REGISTRY_SERVER}
           volumeMounts:
             - name: results-volume
               mountPath: /results

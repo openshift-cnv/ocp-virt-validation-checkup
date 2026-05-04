@@ -34,18 +34,6 @@ trap cleanup_and_exit SIGINT SIGTERM
 
 cd /openshift-virtualization-tests
 
-# Set default registry server if not provided
-REGISTRY_SERVER="${REGISTRY_SERVER:-ghcr.io}"
-
-INSECURE_FLAG=""
-REGISTRY_AUTH=""
-if [ -n "${REGISTRY_SERVER}" ] && [ "${REGISTRY_SERVER}" != "ghcr.io" ]; then
-    INSECURE_FLAG="--insecure=true"
-    if [ -n "${REGISTRY_CONFIG}" ]; then
-        REGISTRY_AUTH="-a ${REGISTRY_CONFIG}"
-    fi
-fi
-
 export ARTIFACTS=${RESULTS_DIR}/tier2
 mkdir -p "${ARTIFACTS}"
 
@@ -173,18 +161,6 @@ else
 fi
 
 export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
-
-# Replace quay.io with custom registry and add --insecure=true to oc image commands in disconnected environments
-if [ -n "${REGISTRY_SERVER}" ] && [ "${REGISTRY_SERVER}" != "ghcr.io" ]; then
-    echo "Replacing quay.io with ${REGISTRY_SERVER} in test code..."
-    find /openshift-virtualization-tests -type f \( -name "*.py" -o -name "*.yaml" -o -name "*.yml" \) \
-        -exec sed -i "s|quay.io|${REGISTRY_SERVER}|g" {} + 2>/dev/null || true
-    
-    echo "Adding --insecure=true to oc image commands..."
-    find /openshift-virtualization-tests -type f \( -name "*.py" -o -name "*.sh" \) \
-        -exec sed -i 's/oc image /oc image --insecure=true /g' {} + 2>/dev/null || true
-    echo "Registry replacement complete"
-fi
 
 grep -A 3 "oc image" utilities/virt.py
 
