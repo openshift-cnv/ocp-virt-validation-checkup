@@ -146,23 +146,9 @@ oc get secret/pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfig
 export REGISTRY_CONFIG
 VIRT_OPERATOR_IMAGE=$(oc get deployment virt-operator -n openshift-cnv -o jsonpath='{.spec.template.spec.containers[0].image}')
 
-# Replace registry server if REGISTRY_SERVER is provided
 INSECURE_FLAG=""
-if [ -n "${REGISTRY_SERVER}" ]; then
-  echo "Replacing registry server with: ${REGISTRY_SERVER}"
-  # Extract the image path after the registry (everything after the first '/')
-  # This handles both registry.redhat.io/path/to/image and registry.redhat.io:port/path/to/image
-  IMAGE_PATH=$(echo "${VIRT_OPERATOR_IMAGE}" | sed 's|^[^/]*/||')
-  VIRT_OPERATOR_IMAGE="${REGISTRY_SERVER}/${IMAGE_PATH}"
-  echo "Using virt-operator image: ${VIRT_OPERATOR_IMAGE}"
-  INSECURE_FLAG="--insecure=true"
-fi
 
 KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${INSECURE_FLAG} ${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
-if [ -z "${KUBEVIRT_TAG}" ]
-then
-  KUBEVIRT_TAG=$(oc image info -a ${REGISTRY_CONFIG} ${INSECURE_FLAG} brew.${VIRT_OPERATOR_IMAGE} -o json --filter-by-os=linux/amd64 | jq -r '.config.config.Labels["upstream-version"]')
-fi
 if [ -z "${KUBEVIRT_TAG}" ]
 then
   # Try quay.io/openshift-virtualization/konflux-builds path as fallback
@@ -179,10 +165,11 @@ then
 fi
 if [ -z "${KUBEVIRT_TAG}" ]
 then
-  echo "Error: could not get kubevirt tag from virt-operator image."
-  exit 1
+  export KUBEVIRT_RELEASE="v1.8.2"
+  echo "WARNING: Could not auto-detect KubeVirt release tag. Using default: ${KUBEVIRT_RELEASE}"
+else
+  export KUBEVIRT_RELEASE="v${KUBEVIRT_TAG%%-[0-9]*}"
 fi
-export KUBEVIRT_RELEASE="v${KUBEVIRT_TAG%%-[0-9]*}"
 
 mkdir -p ${RESULTS_DIR}
 START_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

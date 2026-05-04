@@ -21,13 +21,9 @@ function apply_disk_images_provider() {
         return 0
     fi
     
-    echo "Applying disk-images-provider with KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE}, REGISTRY_SERVER=${REGISTRY_SERVER}"
+    echo "Applying disk-images-provider with KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE}"
     
-    # Replace the image tag with KUBEVIRT_RELEASE and optionally registry with REGISTRY_SERVER, then apply
     local sed_args=(-e "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g")
-    if [ "${REGISTRY_SERVER}" != "quay.io" ]; then
-        sed_args+=(-e "s|quay.io|${REGISTRY_SERVER}|g")
-    fi
     sed "${sed_args[@]}" "${yaml_file}" | oc apply -f -
     
     if [ $? -eq 0 ]; then
@@ -50,9 +46,6 @@ function cleanup_disk_images_provider() {
         if [ -f "${yaml_file}" ]; then
             # Use the same substitution and delete
             local sed_args=(-e "s|__KUBEVIRT_RELEASE__|${KUBEVIRT_RELEASE}|g")
-            if [ "${REGISTRY_SERVER}" != "quay.io" ]; then
-                sed_args+=(-e "s|quay.io|${REGISTRY_SERVER}|g")
-            fi
             sed "${sed_args[@]}" "${yaml_file}" | oc delete -f - --ignore-not-found=true
             echo "disk-images-provider resources deleted"
         fi
@@ -90,9 +83,6 @@ function cleanup_and_exit() {
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 readonly TARGET_NAMESPACE="openshift-cnv"
-
-# Set default registry server if not provided
-REGISTRY_SERVER="${REGISTRY_SERVER:-quay.io}"
 
 # Set up signal traps for cleanup EARLY
 trap cleanup_and_exit SIGINT SIGTERM
@@ -222,7 +212,7 @@ echo "Starting ${SIG} tests 🧪"
     -kubectl-path=/usr/bin/oc \
     -virtctl-path=/home/ocp-virt-validation-checkup/virtctl \
     -kubeconfig ${SCRIPT_DIR}/../../kubeconfig \
-    -utility-container-prefix="${REGISTRY_SERVER}/kubevirt" \
+    -utility-container-prefix="quay.io/kubevirt" \
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \

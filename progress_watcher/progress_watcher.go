@@ -538,9 +538,6 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	if storageClass := os.Getenv("STORAGE_CLASS"); storageClass != "" {
 		env = append(env, fmt.Sprintf("STORAGE_CLASS=%s", storageClass))
 	}
-	if registryServer := os.Getenv("REGISTRY_SERVER"); registryServer != "" {
-		env = append(env, fmt.Sprintf("REGISTRY_SERVER=%s", registryServer))
-	}
 	if fullSuite := os.Getenv("FULL_SUITE"); fullSuite != "" {
 		env = append(env, fmt.Sprintf("FULL_SUITE=%s", fullSuite))
 	}
