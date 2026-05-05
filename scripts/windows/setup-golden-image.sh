@@ -99,6 +99,9 @@ echo "Using storage class: ${STORAGE_CLASS}"
 echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
 
 # Step 6: Apply our custom autounattend ConfigMap to the golden image namespace
+# NOTE: This custom ConfigMap includes the BypassNRO fix for Windows 11.
+# Once kubevirt/kubevirt-tekton-tasks#845 is merged and released,
+# this ConfigMap can be removed in favor of the upstream default.
 echo "Applying Windows autounattend ConfigMap to ${GOLDEN_IMAGE_NAMESPACE}..."
 oc apply -n ${GOLDEN_IMAGE_NAMESPACE} -f "${SCRIPT_DIR}/windows11-autounattend.yaml"
 
