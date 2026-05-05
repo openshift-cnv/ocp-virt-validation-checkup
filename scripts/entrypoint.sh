@@ -373,7 +373,10 @@ if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
   echo "Setting up Windows golden image for Windows tests..."
   WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
   if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
+    # Export variables needed by the Windows setup script
     export STORAGE_CLASS
+    export WIN_IMAGE_DOWNLOAD_URL
+    export ACCEPT_WINDOWS_EULA
     bash "${WINDOWS_SETUP_SCRIPT}"
   else
     echo "Warning: Windows setup script not found at ${WINDOWS_SETUP_SCRIPT}"

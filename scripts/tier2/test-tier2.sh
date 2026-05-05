@@ -169,10 +169,18 @@ if [ -n "${TEST_SKIPS}" ]; then
   SKIP_ARGS=(-k "not ($(echo "${TEST_SKIPS}" | sed 's/|/ or /g'))")
 fi
 
+# Build pytest marker expression
+MARKERS="conformance"
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo "Windows EULA accepted - including Windows tests"
+  MARKERS="${MARKERS} or windows"
+fi
+
 echo "Starting tier2 tests 🧪"
+echo "Using markers: ${MARKERS}"
 
 (set +e; .venv/bin/pytest \
-  -m "conformance" \
+  -m "${MARKERS}" \
   -W "ignore::pytest.PytestRemovedIn9Warning" \
   --skip-artifactory-check \
   --latest-rhel \

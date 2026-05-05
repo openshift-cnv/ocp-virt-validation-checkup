@@ -6,17 +6,29 @@
 # Tekton pipeline. The image is used for Windows storage tests.
 #
 # Prerequisites:
-# - Tekton pipelines installed
-# - windows-efi-installer pipeline available
+# - OpenShift Pipelines operator installed
 # - ACCEPT_WINDOWS_EULA=true (user must explicitly accept Microsoft EULA)
+#
+# Optional:
+# - WIN_IMAGE_DOWNLOAD_URL: Custom Windows ISO download URL
+# - STORAGE_CLASS: Storage class to use (defaults to cluster default)
 #
 
 set -e
 
 SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-NAMESPACE="${POD_NAMESPACE:-openshift-cnv}"
+
+# Golden images should be created in the standard OS images namespace
+GOLDEN_IMAGE_NAMESPACE="openshift-virtualization-os-images"
 GOLDEN_IMAGE_NAME="windows11-golden-image"
 CONFIGMAP_NAME="windows11-autounattend"
+
+# Default Windows 11 ISO URL (can be overridden via WIN_IMAGE_DOWNLOAD_URL env var)
+DEFAULT_WIN_IMAGE_URL="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
+WIN_IMAGE_URL="${WIN_IMAGE_DOWNLOAD_URL:-${DEFAULT_WIN_IMAGE_URL}}"
+
+# Pipeline version for hub resolver
+PIPELINE_VERSION="${TEKTON_PIPELINE_VERSION:-v4.21.0}"
 
 echo "=== Windows Golden Image Setup ==="
 
@@ -30,17 +42,41 @@ fi
 
 echo "Microsoft EULA accepted by user"
 
-# Step 2: Check if golden image DataSource already exists
+# Step 2: Check if OpenShift Pipelines is installed (check for Pipeline CRD)
+echo "Checking if OpenShift Pipelines operator is installed..."
+if ! oc get crd pipelines.tekton.dev &>/dev/null; then
+  echo "ERROR: OpenShift Pipelines operator is not installed"
+  echo ""
+  echo "Please install the OpenShift Pipelines operator from OperatorHub:"
+  echo "  1. Go to OperatorHub in the OpenShift Console"
+  echo "  2. Search for 'Red Hat OpenShift Pipelines'"
+  echo "  3. Install the operator"
+  echo ""
+  echo "Or install via CLI:"
+  echo "  oc apply -f https://raw.githubusercontent.com/openshift/pipelines-operator/main/config/samples/subscription.yaml"
+  exit 1
+fi
+
+echo "OpenShift Pipelines operator is installed"
+
+# Step 3: Ensure the golden image namespace exists
+echo "Ensuring namespace ${GOLDEN_IMAGE_NAMESPACE} exists..."
+if ! oc get namespace ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  echo "Creating namespace ${GOLDEN_IMAGE_NAMESPACE}..."
+  oc create namespace ${GOLDEN_IMAGE_NAMESPACE}
+fi
+
+# Step 4: Check if golden image DataSource already exists
 echo "Checking if Windows golden image already exists..."
-if oc get datasource ${GOLDEN_IMAGE_NAME} -n ${NAMESPACE} &>/dev/null; then
-  echo "Windows golden image DataSource already exists in ${NAMESPACE}"
+if oc get datasource ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  echo "Windows golden image DataSource already exists in ${GOLDEN_IMAGE_NAMESPACE}"
   echo "Skipping image creation"
   exit 0
 fi
 
 # Also check if the DataVolume exists
-if oc get dv ${GOLDEN_IMAGE_NAME} -n ${NAMESPACE} &>/dev/null; then
-  DV_PHASE=$(oc get dv ${GOLDEN_IMAGE_NAME} -n ${NAMESPACE} -o jsonpath='{.status.phase}')
+if oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  DV_PHASE=$(oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o jsonpath='{.status.phase}')
   if [ "${DV_PHASE}" == "Succeeded" ]; then
     echo "Windows golden image DataVolume already exists and succeeded"
     exit 0
@@ -48,35 +84,33 @@ if oc get dv ${GOLDEN_IMAGE_NAME} -n ${NAMESPACE} &>/dev/null; then
   echo "Found existing DataVolume in phase: ${DV_PHASE}"
 fi
 
-# Step 3: Check if Tekton pipeline exists
-echo "Checking for windows-efi-installer pipeline..."
-if ! oc get pipeline windows-efi-installer -n ${NAMESPACE} &>/dev/null; then
-  echo "ERROR: windows-efi-installer pipeline not found in ${NAMESPACE}"
-  echo "Please install kubevirt-tekton-tasks first"
-  exit 1
-fi
-
-# Step 4: Get storage class
+# Step 5: Get storage class (should be passed from entrypoint.sh)
 if [ -z "${STORAGE_CLASS}" ]; then
   STORAGE_CLASS=$(oc get sc -o json | jq -r '[.items[] | select(.metadata.annotations."storageclass.kubernetes.io/is-default-class"=="true")][0].metadata.name')
 fi
 
-if [ -z "${STORAGE_CLASS}" ]; then
+if [ -z "${STORAGE_CLASS}" ] || [ "${STORAGE_CLASS}" == "null" ]; then
   echo "ERROR: No storage class specified and no default found"
+  echo "Please set STORAGE_CLASS environment variable"
   exit 1
 fi
 
 echo "Using storage class: ${STORAGE_CLASS}"
+echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
 
-# Step 5: Apply our custom autounattend ConfigMap
-echo "Applying Windows autounattend ConfigMap..."
-oc apply -n ${NAMESPACE} -f "${SCRIPT_DIR}/windows11-autounattend.yaml"
+# Step 6: Apply our custom autounattend ConfigMap to the golden image namespace
+echo "Applying Windows autounattend ConfigMap to ${GOLDEN_IMAGE_NAMESPACE}..."
+oc apply -n ${GOLDEN_IMAGE_NAMESPACE} -f "${SCRIPT_DIR}/windows11-autounattend.yaml"
 
-# Step 6: Create and run the pipeline
+# Step 7: Create and run the pipeline using hub resolver
+# The hub resolver automatically downloads the pipeline and tasks from artifacthub.io
+# This eliminates the need for users to manually install kubevirt-tekton-tasks
 echo "Creating Windows golden image pipeline run..."
+echo "Using hub resolver to fetch pipeline from artifacthub (version: ${PIPELINE_VERSION})"
+echo "Note: Hub resolver requires internet access. For offline environments, pre-install the pipeline."
 
-PIPELINE_RUN_NAME=$(oc create -n ${NAMESPACE} -f - <<EOF | grep -oP 'pipelinerun.tekton.dev/\K[^ ]+'
-apiVersion: tekton.dev/v1beta1
+PIPELINE_RUN_NAME=$(oc create -n ${GOLDEN_IMAGE_NAMESPACE} -f - <<EOF | grep -oP 'pipelinerun.tekton.dev/\K[^ ]+'
+apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   generateName: windows11-golden-
@@ -84,16 +118,27 @@ metadata:
     app: self-validation
 spec:
   pipelineRef:
-    name: windows-efi-installer
+    resolver: hub
+    params:
+      - name: catalog
+        value: redhat-pipelines
+      - name: type
+        value: artifact
+      - name: kind
+        value: pipeline
+      - name: name
+        value: windows-efi-installer
+      - name: version
+        value: "${PIPELINE_VERSION}"
   params:
     - name: winImageDownloadURL
-      value: "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
+      value: "${WIN_IMAGE_URL}"
     - name: acceptEula
       value: "true"
     - name: baseDvName
       value: "${GOLDEN_IMAGE_NAME}"
     - name: baseDvNamespace
-      value: "${NAMESPACE}"
+      value: "${GOLDEN_IMAGE_NAMESPACE}"
     - name: autounattendConfigMapName
       value: "${CONFIGMAP_NAME}"
     - name: instanceTypeName
@@ -104,12 +149,18 @@ spec:
       value: "windows.11.virtio"
     - name: preferenceKind
       value: "VirtualMachineClusterPreference"
+  taskRunSpecs:
+    - pipelineTaskName: modify-windows-iso-file
+      podTemplate:
+        securityContext:
+          fsGroup: 107
+          runAsUser: 107
 EOF
 )
 
 echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
 
-# Step 7: Wait for pipeline to complete (with timeout)
+# Step 8: Wait for pipeline to complete (with timeout)
 echo "Waiting for Windows installation to complete..."
 echo "This may take 60-90 minutes for first-time setup"
 
@@ -118,22 +169,32 @@ POLL_INTERVAL=60
 ELAPSED=0
 
 while [ ${ELAPSED} -lt ${TIMEOUT_SECONDS} ]; do
-  STATUS=$(oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${NAMESPACE} -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || echo "Unknown")
+  STATUS=$(oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || echo "Unknown")
   
   case "${STATUS}" in
     "Succeeded")
       echo "Pipeline completed successfully!"
-      echo "Windows golden image is ready: ${GOLDEN_IMAGE_NAME}"
+      echo "Windows golden image is ready: ${GOLDEN_IMAGE_NAME} in namespace ${GOLDEN_IMAGE_NAMESPACE}"
       exit 0
       ;;
-    "Failed"|"PipelineRunTimeout"|"TaskRunCancelled")
+    "Failed"|"PipelineRunTimeout"|"TaskRunCancelled"|"CouldntGetPipeline")
       echo "ERROR: Pipeline failed with status: ${STATUS}"
-      oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${NAMESPACE} -o yaml | tail -50
+      echo ""
+      # Check if it's a resolver error
+      if [ "${STATUS}" == "CouldntGetPipeline" ]; then
+        echo "Failed to fetch pipeline from artifacthub. This could mean:"
+        echo "  1. No internet access (hub resolver requires network)"
+        echo "  2. The pipeline version ${PIPELINE_VERSION} doesn't exist"
+        echo ""
+        echo "For offline environments, manually install the pipeline first:"
+        echo "  https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer"
+      fi
+      oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o yaml | tail -50
       exit 1
       ;;
     *)
       # Still running, show progress
-      CURRENT_TASK=$(oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${NAMESPACE} -o jsonpath='{.status.childReferences[-1].name}' 2>/dev/null || echo "starting")
+      CURRENT_TASK=$(oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o jsonpath='{.status.childReferences[-1].name}' 2>/dev/null || echo "starting")
       echo "[${ELAPSED}s] Status: ${STATUS}, Current: ${CURRENT_TASK}"
       ;;
   esac
