@@ -236,6 +236,54 @@ In order to see which tests are going to be run, without actually executing them
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e DRY_RUN=true ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 
+### Windows Testing (Optional)
+
+The validation checkup supports optional Windows VM testing. When enabled, the checkup will:
+1. Create a Windows 11 golden image using the `windows-efi-installer` Tekton pipeline
+2. Run Windows-specific tests from the tier2 test suite
+
+#### Prerequisites for Windows Testing
+- **OpenShift Pipelines operator** must be installed on the cluster
+- **Internet access** is required to download the Windows ISO and fetch the pipeline from Artifact Hub (see [Disconnected Environments](#disconnected-environments) for air-gapped clusters)
+- **Sufficient storage** for the Windows golden image (~64GB recommended)
+
+#### Enabling Windows Testing
+To enable Windows testing, set the `ACCEPT_WINDOWS_EULA` environment variable to `true`:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
+    -e ACCEPT_WINDOWS_EULA=true \
+    ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+
+**Note:** By setting `ACCEPT_WINDOWS_EULA=true`, you acknowledge acceptance of Microsoft's End User License Agreement for Windows.
+
+#### Optional Windows Parameters
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `ACCEPT_WINDOWS_EULA` | Enable Windows testing (must be `true` to enable) | `false` |
+| `WIN_IMAGE_DOWNLOAD_URL` | Custom Windows 11 ISO download URL | Default Microsoft URL |
+| `TEKTON_PIPELINE_VERSION` | Version of the `windows-efi-installer` pipeline | `v4.21.0` |
+
+Example with custom ISO URL:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
+    -e ACCEPT_WINDOWS_EULA=true \
+    -e WIN_IMAGE_DOWNLOAD_URL="https://my-internal-server/windows11.iso" \
+    ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+
+#### How It Works
+When Windows testing is enabled:
+1. The checkup verifies that the OpenShift Pipelines operator is installed
+2. A Windows 11 golden image is created in the `openshift-virtualization-os-images` namespace using the `windows-efi-installer` Tekton pipeline (fetched automatically via the hub resolver)
+3. The tier2 test suite includes Windows-specific tests marked with `@pytest.mark.windows`
+4. The golden image is reused for subsequent runs if it already exists
+
+**Note:** The initial Windows image creation takes approximately 60-90 minutes. Subsequent runs will skip this step if the golden image already exists.
+
+**Note:** Windows-specific tests require the `@pytest.mark.windows` marker to be added to the [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository. Until then, enabling Windows testing will prepare the golden image but no Windows-specific tests will run.
+
 ## Disconnected Environments
 The validation checkup can be run on disconnected (air-gapped) OpenShift clusters by mirroring the required test images to an accessible registry and configuring mirror sets (ITMS + IDMS). No changes to the checkup configuration are needed -- mirror sets transparently redirect image pulls at the CRI-O level.
 

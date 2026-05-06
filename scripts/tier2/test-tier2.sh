@@ -170,9 +170,12 @@ if [ -n "${TEST_SKIPS}" ]; then
 fi
 
 # Build pytest marker expression
+# Note: Windows tests require @pytest.mark.windows marker in openshift-virtualization-tests
+# When Windows tests are added with this marker, they will be automatically included
+# when ACCEPT_WINDOWS_EULA=true
 MARKERS="conformance"
 if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
-  echo "Windows EULA accepted - including Windows tests"
+  echo "Windows EULA accepted - Windows tests will be included when available"
   MARKERS="${MARKERS} or windows"
 fi
 
