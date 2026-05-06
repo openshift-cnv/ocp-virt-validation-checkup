@@ -77,7 +77,16 @@ if ! oc get namespace ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
   oc create namespace ${GOLDEN_IMAGE_NAMESPACE}
 fi
 
-# Step 4: Check if golden image DataSource already exists
+# Step 4: Ensure pipeline service account exists (required for Tekton)
+echo "Ensuring pipeline service account exists..."
+if ! oc get sa pipeline -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
+  echo "Creating pipeline service account..."
+  oc create serviceaccount pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
+  oc adm policy add-scc-to-user privileged -z pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
+  oc adm policy add-role-to-user edit -z pipeline -n ${GOLDEN_IMAGE_NAMESPACE}
+fi
+
+# Step 5: Check if golden image DataSource already exists
 echo "Checking if Windows golden image already exists..."
 if oc get datasource ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
   echo "Windows golden image DataSource already exists in ${GOLDEN_IMAGE_NAMESPACE}"
@@ -95,7 +104,7 @@ if oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
   echo "Found existing DataVolume in phase: ${DV_PHASE}"
 fi
 
-# Step 5: Verify storage class is set (should be passed from entrypoint.sh)
+# Step 6: Verify storage class is set (should be passed from entrypoint.sh)
 if [ -z "${STORAGE_CLASS}" ]; then
   echo "ERROR: STORAGE_CLASS environment variable is not set"
   echo "This should be set by entrypoint.sh before calling this script"
@@ -105,7 +114,7 @@ fi
 echo "Using storage class: ${STORAGE_CLASS}"
 echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
 
-# Step 6: Create and run the pipeline using hub resolver
+# Step 7: Create and run the pipeline using hub resolver
 # The hub resolver automatically downloads the pipeline and tasks from artifacthub.io
 # This eliminates the need for users to manually install kubevirt-tekton-tasks
 # NOTE: The BypassNRO fix for Windows 11 is included in upstream (kubevirt/kubevirt-tekton-tasks#845)
@@ -121,6 +130,8 @@ metadata:
   labels:
     app: ocp-virt-validation
 spec:
+  timeouts:
+    pipeline: "3h"
   pipelineRef:
     resolver: hub
     params:
@@ -162,7 +173,7 @@ EOF
 
 echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
 
-# Step 7: Wait for pipeline to complete (with timeout)
+# Step 8: Wait for pipeline to complete (with timeout)
 echo "Waiting for Windows installation to complete..."
 echo "This may take 60-90 minutes for first-time setup"
 
