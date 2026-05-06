@@ -21,7 +21,6 @@ SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 # Golden images should be created in the standard OS images namespace
 GOLDEN_IMAGE_NAMESPACE="openshift-virtualization-os-images"
 GOLDEN_IMAGE_NAME="windows11-golden-image"
-CONFIGMAP_NAME="windows11-autounattend"
 
 # Default Windows 11 ISO URL (can be overridden via WIN_IMAGE_DOWNLOAD_URL env var)
 DEFAULT_WIN_IMAGE_URL="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
@@ -53,7 +52,19 @@ if ! oc get crd pipelines.tekton.dev &>/dev/null; then
   echo "  3. Install the operator"
   echo ""
   echo "Or install via CLI:"
-  echo "  oc apply -f https://raw.githubusercontent.com/openshift/pipelines-operator/main/config/samples/subscription.yaml"
+  echo "  oc apply -f - <<EOF"
+  echo "apiVersion: operators.coreos.com/v1alpha1"
+  echo "kind: Subscription"
+  echo "metadata:"
+  echo "  name: openshift-pipelines-operator-rh"
+  echo "  namespace: openshift-operators"
+  echo "spec:"
+  echo "  channel: stable"
+  echo "  installPlanApproval: Automatic"
+  echo "  name: openshift-pipelines-operator-rh"
+  echo "  source: redhat-operators"
+  echo "  sourceNamespace: openshift-marketplace"
+  echo "EOF"
   exit 1
 fi
 
@@ -84,33 +95,23 @@ if oc get dv ${GOLDEN_IMAGE_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} &>/dev/null; then
   echo "Found existing DataVolume in phase: ${DV_PHASE}"
 fi
 
-# Step 5: Get storage class (should be passed from entrypoint.sh)
+# Step 5: Verify storage class is set (should be passed from entrypoint.sh)
 if [ -z "${STORAGE_CLASS}" ]; then
-  STORAGE_CLASS=$(oc get sc -o json | jq -r '[.items[] | select(.metadata.annotations."storageclass.kubernetes.io/is-default-class"=="true")][0].metadata.name')
-fi
-
-if [ -z "${STORAGE_CLASS}" ] || [ "${STORAGE_CLASS}" == "null" ]; then
-  echo "ERROR: No storage class specified and no default found"
-  echo "Please set STORAGE_CLASS environment variable"
+  echo "ERROR: STORAGE_CLASS environment variable is not set"
+  echo "This should be set by entrypoint.sh before calling this script"
   exit 1
 fi
 
 echo "Using storage class: ${STORAGE_CLASS}"
 echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
 
-# Step 6: Apply our custom autounattend ConfigMap to the golden image namespace
-# NOTE: This custom ConfigMap includes the BypassNRO fix for Windows 11.
-# Once kubevirt/kubevirt-tekton-tasks#845 is merged and released,
-# this ConfigMap can be removed in favor of the upstream default.
-echo "Applying Windows autounattend ConfigMap to ${GOLDEN_IMAGE_NAMESPACE}..."
-oc apply -n ${GOLDEN_IMAGE_NAMESPACE} -f "${SCRIPT_DIR}/windows11-autounattend.yaml"
-
-# Step 7: Create and run the pipeline using hub resolver
+# Step 6: Create and run the pipeline using hub resolver
 # The hub resolver automatically downloads the pipeline and tasks from artifacthub.io
 # This eliminates the need for users to manually install kubevirt-tekton-tasks
+# NOTE: The BypassNRO fix for Windows 11 is included in upstream (kubevirt/kubevirt-tekton-tasks#845)
 echo "Creating Windows golden image pipeline run..."
 echo "Using hub resolver to fetch pipeline from artifacthub (version: ${PIPELINE_VERSION})"
-echo "Note: Hub resolver requires internet access. For offline environments, pre-install the pipeline."
+echo "Note: Hub resolver requires internet access. For disconnected environments, pre-install the pipeline."
 
 PIPELINE_RUN_NAME=$(oc create -n ${GOLDEN_IMAGE_NAMESPACE} -f - <<EOF | grep -oP 'pipelinerun.tekton.dev/\K[^ ]+'
 apiVersion: tekton.dev/v1
@@ -118,7 +119,7 @@ kind: PipelineRun
 metadata:
   generateName: windows11-golden-
   labels:
-    app: self-validation
+    app: ocp-virt-validation
 spec:
   pipelineRef:
     resolver: hub
@@ -142,8 +143,6 @@ spec:
       value: "${GOLDEN_IMAGE_NAME}"
     - name: baseDvNamespace
       value: "${GOLDEN_IMAGE_NAMESPACE}"
-    - name: autounattendConfigMapName
-      value: "${CONFIGMAP_NAME}"
     - name: instanceTypeName
       value: "u1.2xlarge"
     - name: instanceTypeKind
@@ -163,7 +162,7 @@ EOF
 
 echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
 
-# Step 8: Wait for pipeline to complete (with timeout)
+# Step 7: Wait for pipeline to complete (with timeout)
 echo "Waiting for Windows installation to complete..."
 echo "This may take 60-90 minutes for first-time setup"
 
@@ -189,7 +188,7 @@ while [ ${ELAPSED} -lt ${TIMEOUT_SECONDS} ]; do
         echo "  1. No internet access (hub resolver requires network)"
         echo "  2. The pipeline version ${PIPELINE_VERSION} doesn't exist"
         echo ""
-        echo "For offline environments, manually install the pipeline first:"
+        echo "For disconnected environments, manually install the pipeline first:"
         echo "  https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer"
       fi
       oc get pipelinerun ${PIPELINE_RUN_NAME} -n ${GOLDEN_IMAGE_NAMESPACE} -o yaml | tail -50
