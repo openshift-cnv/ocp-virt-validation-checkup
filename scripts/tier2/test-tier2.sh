@@ -202,10 +202,21 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
+# Build pytest marker expression
+# Note: Windows tests require @pytest.mark.windows marker in openshift-virtualization-tests
+# When Windows tests are added with this marker, they will be automatically included
+# when ACCEPT_WINDOWS_EULA=true
+MARKERS="conformance"
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo "Windows EULA accepted - Windows tests will be included when available"
+  MARKERS="${MARKERS} or windows"
+fi
+
 echo "Starting tier2 tests 🧪"
+echo "Using markers: ${MARKERS}"
 
 (set +e; .venv/bin/pytest \
-  -m "conformance" \
+  -m "${MARKERS}" \
   -W "ignore::pytest.PytestRemovedIn9Warning" \
   --skip-artifactory-check \
   --latest-rhel \
@@ -227,6 +238,30 @@ echo "Tier2 test process started with PID: ${TEST_PID}"
 
 # Wait for the test to complete
 wait ${TEST_PID} || true
+
+# Run local Windows tests if EULA is accepted
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo ""
+  echo "=== Running local Windows VM tests ==="
+  SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+  if [ -d "${SCRIPT_DIR}/tests" ]; then
+    (set +e; .venv/bin/pytest \
+      "${SCRIPT_DIR}/tests" \
+      -m "windows" \
+      -v \
+      --junitxml="${ARTIFACTS}/junit.windows.xml" \
+      -s -o log_cli=true; echo $? > "${ARTIFACTS}/.windows_exit_code") 2>&1 | tee -a ${ARTIFACTS}/tier2-log.txt
+    
+    WINDOWS_EXIT_CODE=$(cat "${ARTIFACTS}/.windows_exit_code" 2>/dev/null || echo "1")
+    if [ "${WINDOWS_EXIT_CODE}" == "0" ]; then
+      echo "Windows tests PASSED!"
+    else
+      echo "Windows tests had failures (exit code: ${WINDOWS_EXIT_CODE})"
+    fi
+  else
+    echo "No local Windows tests found in ${SCRIPT_DIR}/tests"
+  fi
+fi
 
 # Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
 # since pytest -k deselection omits them from the report entirely.

@@ -345,3 +345,71 @@ The script will:
 2. Mirror all required images with `--keep-manifest-list=true` to preserve multi-arch manifest lists
 3. When using `--use-internal-registry`, expose the internal registry route, create the mirror namespace, configure RBAC, and authenticate
 4. Optionally generate and apply both `ImageTagMirrorSet` and `ImageDigestMirrorSet`
+
+## Windows Testing in Disconnected Environments
+
+Windows testing requires additional setup in disconnected environments because the `windows-efi-installer` Tekton pipeline normally uses the hub resolver to fetch the pipeline and tasks from Artifact Hub, which requires internet access.
+
+### Prerequisites for Disconnected Windows Testing
+
+1. **OpenShift Pipelines operator** installed on the cluster
+2. **Windows 11 ISO** available on an accessible internal server
+3. **Tekton pipeline and tasks** pre-installed manually
+
+### Step 1: Download the Windows ISO
+
+Download the Windows 11 ISO from Microsoft on a connected machine and host it on an internal HTTP server accessible from the cluster:
+
+```bash
+# On connected machine
+curl -L -o windows11.iso "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
+
+# Copy to your internal HTTP server
+scp windows11.iso user@internal-server:/var/www/html/images/
+```
+
+### Step 2: Pre-install the Tekton Pipeline
+
+Since the hub resolver cannot fetch from Artifact Hub in disconnected environments, you must manually install the `windows-efi-installer` pipeline and its tasks.
+
+Download the pipeline manifests from a connected machine:
+```bash
+# On connected machine
+curl -L -o windows-efi-installer.yaml \
+  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/pipelines/windows-efi-installer/windows-efi-installer.yaml"
+
+curl -L -o windows-efi-installer-tasks.yaml \
+  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/tasks/windows-efi-installer/windows-efi-installer-tasks.yaml"
+
+curl -L -o windows-efi-installer-configmaps.yaml \
+  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/pipelines/windows-efi-installer/configmaps/windows-efi-installer-configmaps.yaml"
+```
+
+Transfer and apply to the disconnected cluster:
+```bash
+# Apply to the golden image namespace
+oc apply -f windows-efi-installer-tasks.yaml -n openshift-virtualization-os-images
+oc apply -f windows-efi-installer-configmaps.yaml -n openshift-virtualization-os-images
+oc apply -f windows-efi-installer.yaml -n openshift-virtualization-os-images
+```
+
+Alternatively, get the manifests from Artifact Hub:
+- https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer
+
+### Step 3: Run the Checkup with Custom Windows ISO URL
+
+When running the validation checkup, specify your internal Windows ISO URL:
+
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
+    -e ACCEPT_WINDOWS_EULA=true \
+    -e WIN_IMAGE_DOWNLOAD_URL="http://internal-server.example.com/images/windows11.iso" \
+    ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+
+### Notes for Disconnected Windows Testing
+
+- The Windows golden image will be created in the `openshift-virtualization-os-images` namespace
+- The image creation takes approximately 60-90 minutes on first run
+- Once created, the golden image is reused for subsequent test runs
+- If the hub resolver fails (due to no internet), the checkup will provide instructions for manual pipeline installation
