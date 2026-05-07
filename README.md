@@ -165,6 +165,16 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_S
 ```
 **Note:** the value passed to `TEST_SKIPS` should be pipe-separated.
 
+#### Test Focus
+In order to run only specific test cases, a `TEST_FOCUS` environment variable can be specified. Only tests matching the provided patterns will be executed.
+Example:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_FOCUS="test_id:1618|test_id:1783" ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+**Note:** the value passed to `TEST_FOCUS` should be pipe-separated, same as `TEST_SKIPS`.
+
+If the same test appears in both `TEST_FOCUS` and `TEST_SKIPS`, a warning is printed and the test **will run** (`TEST_FOCUS` takes precedence).
+
 #### Full Suite
 By default, only a small, representative and most robust test cases are selected to run.  
 In order to run all of the available tests, without filtering only to the conformance ones, the ` FULL_SUITE` environment variable can be set to `true`.  
