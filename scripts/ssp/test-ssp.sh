@@ -12,6 +12,29 @@ if [ -n "${TEST_SKIPS}" ]; then
   skip_tests+=("${TEST_SKIPS}")
 fi
 
+ginkgo_focus=""
+if [ -n "${TEST_FOCUS}" ]; then
+  IFS='|' read -ra focus_entries <<< "${TEST_FOCUS}"
+  filtered_skip_tests=()
+  for skip in "${skip_tests[@]}"; do
+    dominated=false
+    for f in "${focus_entries[@]}"; do
+      if [[ "${skip}" == "${f}" ]]; then
+        echo "WARNING: '${f}' is in both TEST_FOCUS and TEST_SKIPS. Removing from skip list so it will run."
+        dominated=true
+        break
+      fi
+    done
+    if [ "${dominated}" = false ]; then
+      filtered_skip_tests+=("${skip}")
+    fi
+  done
+  skip_tests=("${filtered_skip_tests[@]}")
+
+  focus_regex=$(printf '(%s)|' "${focus_entries[@]}")
+  ginkgo_focus=$(printf -- '--ginkgo.focus=%s' "${focus_regex:0:-1}")
+fi
+
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
 
@@ -57,6 +80,7 @@ ${SSP_TESTS_BINARY} \
   --ginkgo.junit-report="${ARTIFACTS}/junit.results.xml" \
   --ginkgo.skip='\[QUARANTINE\]' \
   ${label_filter} \
+  ${ginkgo_focus} \
   --ginkgo.v \
   --ginkgo.no-color \
   ${DRY_RUN_FLAG} \
