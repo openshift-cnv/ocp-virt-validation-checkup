@@ -40,12 +40,31 @@ fi
 
 
 TEST_SKIPS=${TEST_SKIPS:-""}
+TEST_FOCUS=${TEST_FOCUS:-""}
 
-VALID_SKIP_REGEX='^([a-zA-Z0-9_:|-]+)(\|([a-zA-Z0-9_:|-]+))*$'
-if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_SKIP_REGEX} ]]; then
+VALID_FILTER_REGEX='^([^|]+)(\|([^|]+))*$'
+if [[ -n "${TEST_SKIPS}" && ! "${TEST_SKIPS}" =~ ${VALID_FILTER_REGEX} ]]; then
   echo "Invalid TEST_SKIPS format: \"${TEST_SKIPS}\""
   echo "Expected: pipe-separated list of test cases"
   exit 1
+fi
+
+if [[ -n "${TEST_FOCUS}" && ! "${TEST_FOCUS}" =~ ${VALID_FILTER_REGEX} ]]; then
+  echo "Invalid TEST_FOCUS format: \"${TEST_FOCUS}\""
+  echo "Expected: pipe-separated list of test cases"
+  exit 1
+fi
+
+if [[ -n "${TEST_FOCUS}" && -n "${TEST_SKIPS}" ]]; then
+  IFS='|' read -ra focus_entries <<< "${TEST_FOCUS}"
+  IFS='|' read -ra skip_entries <<< "${TEST_SKIPS}"
+  for f in "${focus_entries[@]}"; do
+    for s in "${skip_entries[@]}"; do
+      if [[ "${f}" == "${s}" ]]; then
+        echo "WARNING: '${f}' appears in both TEST_FOCUS and TEST_SKIPS. TEST_FOCUS takes precedence; test will run."
+      fi
+    done
+  done
 fi
 
 # Validate STORAGE_CAPABILITIES if provided
@@ -189,6 +208,8 @@ spec:
               value: ${TEST_SUITES}
             - name: TEST_SKIPS
               value: ${TEST_SKIPS}
+            - name: TEST_FOCUS
+              value: ${TEST_FOCUS}
             - name: FULL_SUITE
               value: "${FULL_SUITE}"
             - name: STORAGE_CLASS

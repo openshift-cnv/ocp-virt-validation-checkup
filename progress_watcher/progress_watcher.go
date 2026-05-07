@@ -544,6 +544,9 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	if testSkips := os.Getenv("TEST_SKIPS"); testSkips != "" {
 		env = append(env, fmt.Sprintf("TEST_SKIPS=%s", testSkips))
 	}
+	if testFocus := os.Getenv("TEST_FOCUS"); testFocus != "" {
+		env = append(env, fmt.Sprintf("TEST_FOCUS=%s", testFocus))
+	}
 
 	// Add suite-specific environment variables
 	if suiteName == "tier2" {

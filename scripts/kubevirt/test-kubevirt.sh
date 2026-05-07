@@ -109,6 +109,29 @@ for ginkgo_label_name in $(jq -r '.[].ginkgo_label_name' $skip_tests_labels_file
   label_filter+=( "!($ginkgo_label_name)" )
 done
 
+# If TEST_FOCUS is set, remove any overlapping entries from skip list so focused tests run
+if [ -n "${TEST_FOCUS}" ]; then
+  IFS='|' read -ra focus_entries <<< "${TEST_FOCUS}"
+  filtered_skip_tests=()
+  for skip in "${skip_tests[@]}"; do
+    dominated=false
+    for f in "${focus_entries[@]}"; do
+      if [[ "${skip}" == "${f}" ]]; then
+        echo "WARNING: '${f}' is in both TEST_FOCUS and TEST_SKIPS. Removing from skip list so it will run."
+        dominated=true
+        break
+      fi
+    done
+    if [ "${dominated}" = false ]; then
+      filtered_skip_tests+=("${skip}")
+    fi
+  done
+  skip_tests=("${filtered_skip_tests[@]}")
+
+  focus_regex=$(printf '(%s)|' "${focus_entries[@]}")
+  ginkgo_focus=$(printf -- '--ginkgo.focus=%s' "${focus_regex:0:-1}")
+fi
+
 skip_regex=$(printf '(%s)|' "${skip_tests[@]}")
 skip_arg=$(printf -- '--ginkgo.skip=%s' "${skip_regex:0:-1}")
 
