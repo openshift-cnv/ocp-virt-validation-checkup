@@ -9,3 +9,7 @@ test:
 .PHONY: ci-validate
 ci-validate:
 	@bash ci/run-ci-validation.sh
+
+.PHONY: ci-validate-disconnected
+ci-validate-disconnected:
+	@bash ci/run-ci-validation-disconnected.sh
