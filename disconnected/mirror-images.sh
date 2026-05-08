@@ -8,6 +8,7 @@ KUBEVIRT_RELEASE=""
 MIRROR_REGISTRY=""
 USE_INTERNAL_REGISTRY=false
 APPLY_MIRROR_SET=false
+NEVER_CONTACT_SOURCE=false
 PULL_SECRET="${PULL_SECRET:-}"
 TLS_VERIFY=true
 
@@ -47,6 +48,7 @@ Options:
   --pull-secret FILE           Path to pull secret for registry authentication
   --insecure                   Skip TLS verification for the mirror registry
   --apply-mirror-set           Generate and apply ITMS + IDMS after mirroring
+  --never-contact-source       Set mirrorSourcePolicy to NeverContactSource in mirror sets
   -h, --help                   Show this help message
 
 Examples:
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --pull-secret)    PULL_SECRET="$2"; shift 2 ;;
     --insecure)       TLS_VERIFY=false; shift ;;
     --apply-mirror-set)      APPLY_MIRROR_SET=true; shift ;;
+    --never-contact-source)  NEVER_CONTACT_SOURCE=true; shift ;;
     -h|--help)        usage ;;
     *)                echo "Unknown option: $1"; usage ;;
   esac
@@ -338,6 +341,11 @@ generate_mirror_set() {
     other_prefix="${MIRROR_REGISTRY}"
   fi
 
+  local source_policy=""
+  if [ "${NEVER_CONTACT_SOURCE}" = true ]; then
+    source_policy=$'\n      mirrorSourcePolicy: NeverContactSource'
+  fi
+
   cat > "${mirror_set_file}" <<EOF
 apiVersion: config.openshift.io/v1
 kind: ImageTagMirrorSet
@@ -347,13 +355,13 @@ spec:
   imageTagMirrors:
     - source: quay.io/kubevirt
       mirrors:
-        - ${target_prefix}
+        - ${target_prefix}${source_policy}
     - source: quay.io/openshift-cnv
       mirrors:
-        - ${tier2_prefix}
+        - ${tier2_prefix}${source_policy}
     - source: registry.redhat.io/rhel9
       mirrors:
-        - ${other_prefix}
+        - ${other_prefix}${source_policy}
 ---
 apiVersion: config.openshift.io/v1
 kind: ImageDigestMirrorSet
@@ -363,13 +371,13 @@ spec:
   imageDigestMirrors:
     - source: quay.io/kubevirt
       mirrors:
-        - ${target_prefix}
+        - ${target_prefix}${source_policy}
     - source: quay.io/openshift-cnv
       mirrors:
-        - ${tier2_prefix}
+        - ${tier2_prefix}${source_policy}
     - source: registry.redhat.io/rhel9
       mirrors:
-        - ${other_prefix}
+        - ${other_prefix}${source_policy}
 EOF
 
   echo ""
