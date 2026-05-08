@@ -164,9 +164,42 @@ export OPENSHIFT_PYTHON_WRAPPER_LOG_FILE=${ARTIFACTS}/ocp-wrapper-log.txt
 
 grep -A 3 "oc image" utilities/virt.py
 
-SKIP_ARGS=()
-if [ -n "${TEST_SKIPS}" ]; then
-  SKIP_ARGS=(-k "not ($(echo "${TEST_SKIPS}" | sed 's/|/ or /g'))")
+K_EXPR=""
+
+if [ -n "${TEST_FOCUS}" ] && [ -n "${TEST_SKIPS}" ]; then
+  IFS='|' read -ra focus_entries <<< "${TEST_FOCUS}"
+  IFS='|' read -ra skip_entries <<< "${TEST_SKIPS}"
+  filtered_skips=()
+  for s in "${skip_entries[@]}"; do
+    overlap=false
+    for f in "${focus_entries[@]}"; do
+      if [[ "${s}" == "${f}" ]]; then
+        echo "WARNING: '${f}' is in both TEST_FOCUS and TEST_SKIPS. TEST_FOCUS takes precedence; test will run."
+        overlap=true
+        break
+      fi
+    done
+    if [ "${overlap}" = false ]; then
+      filtered_skips+=("${s}")
+    fi
+  done
+
+  focus_expr="$(echo "${TEST_FOCUS}" | sed 's/|/ or /g')"
+  if [ ${#filtered_skips[@]} -gt 0 ]; then
+    skip_expr="$(IFS='|'; echo "${filtered_skips[*]}" | sed 's/|/ or /g')"
+    K_EXPR="(${focus_expr}) and not (${skip_expr})"
+  else
+    K_EXPR="${focus_expr}"
+  fi
+elif [ -n "${TEST_FOCUS}" ]; then
+  K_EXPR="$(echo "${TEST_FOCUS}" | sed 's/|/ or /g')"
+elif [ -n "${TEST_SKIPS}" ]; then
+  K_EXPR="not ($(echo "${TEST_SKIPS}" | sed 's/|/ or /g'))"
+fi
+
+K_ARGS=()
+if [ -n "${K_EXPR}" ]; then
+  K_ARGS=(-k "${K_EXPR}")
 fi
 
 echo "Starting tier2 tests 🧪"
@@ -182,7 +215,7 @@ echo "Starting tier2 tests 🧪"
   ${HCP_FLAG} \
   -s -o log_cli=true \
   ${DRY_RUN_FLAG} \
-  "${SKIP_ARGS[@]}" \
+  "${K_ARGS[@]}" \
   --data-collector \
   --data-collector-output-dir=${ARTIFACTS} \
   --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
@@ -198,12 +231,17 @@ wait ${TEST_PID} || true
 # Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
 # since pytest -k deselection omits them from the report entirely.
 # Only count entries that match real conformance test names.
+# Exclude any entries that also appear in TEST_FOCUS (those were not skipped).
 if [ -n "${TEST_SKIPS}" ]; then
   .venv/bin/python -c "
 import subprocess, sys, xml.etree.ElementTree as ET
 
 junit_path = sys.argv[1]
 skip_entries = sys.argv[2].split('|')
+focus_entries = sys.argv[3].split('|') if sys.argv[3] else []
+
+# Remove entries that are also in TEST_FOCUS (they were not skipped)
+skip_entries = [e for e in skip_entries if e not in focus_entries]
 
 # Collect all conformance test node IDs (without running them)
 result = subprocess.run(
@@ -224,5 +262,5 @@ if matched:
     for ts in tree.iter('testsuite'):
         ts.set('skipped', str(int(ts.get('skipped', '0')) + len(matched)))
     tree.write(junit_path, xml_declaration=True, encoding='unicode')
-" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}"
+" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}" "${TEST_FOCUS}"
 fi
