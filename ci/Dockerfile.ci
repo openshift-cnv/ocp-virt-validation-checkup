@@ -25,25 +25,38 @@ RUN GOOS=linux CGO_ENABLED=1 go test -c -o bin/ssp.test ./tests
 
 
 ################################################################################
-# Build Stage 3: Utilities and Tier2 Tests
+# Build Stage 3: Utilities
 ################################################################################
 FROM docker.io/library/golang:1.23 AS utilities-builder
 
-# Build arguments for user permissions
-ARG USER_UID=1001
-
-# Build junit_parser and progress_watcher utilities
 WORKDIR /workspace
 COPY . .
 RUN make build
 
-# Clone openshift-virtualization-tests repository for tier2 tests
+
+################################################################################
+# Build Stage 4: Tier2 Tests (Python venv)
+################################################################################
+FROM registry.access.redhat.com/ubi9/ubi:9.6 AS cnv-tests-builder
+
+ARG USER_UID=1001
 ARG OPENSHIFT_VIRT_TESTS_REPO=https://github.com/RedHatQE/openshift-virtualization-tests.git
 ARG OPENSHIFT_VIRT_TESTS_BRANCH=main
 ARG TEST_DIR=/openshift-virtualization-tests
 
-RUN git clone --depth 1 --branch ${OPENSHIFT_VIRT_TESTS_BRANCH} ${OPENSHIFT_VIRT_TESTS_REPO} ${TEST_DIR} && \
-    chown -R ${USER_UID}:0 ${TEST_DIR} && \
+RUN dnf -y install python3-devel gcc cargo openssl-devel sshpass \
+        libcurl-devel libxslt-devel libxml2-devel git which && \
+    dnf clean all
+
+RUN pip3 install uv
+
+RUN git clone --depth 1 --branch ${OPENSHIFT_VIRT_TESTS_BRANCH} ${OPENSHIFT_VIRT_TESTS_REPO} ${TEST_DIR}
+
+WORKDIR ${TEST_DIR}
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+RUN uv sync --locked
+
+RUN chown -R ${USER_UID}:0 ${TEST_DIR} && \
     chmod -R ug+rwx ${TEST_DIR}
 
 
@@ -62,7 +75,8 @@ ENV USER_UID=${USER_UID} \
     HOME=${HOME}
 
 # Install system dependencies and OpenShift CLI tools
-RUN microdnf install -y jq make tar gzip python3 git which sshpass findutils grep sed && \
+RUN microdnf install -y jq make tar gzip python3 git which sshpass findutils grep sed \
+        libxslt libxml2 libatomic && \
     microdnf clean all && \
     curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl && \
     mkdir -p ${HOME} && \
@@ -81,8 +95,9 @@ COPY --from=ssp-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/ssp.tes
 COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/junit_parser /usr/local/bin/junit_parser
 COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/progress_watcher /usr/local/bin/progress_watcher
 
-# Copy openshift-virtualization-tests for tier2 test suite
-COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /openshift-virtualization-tests /openshift-virtualization-tests
+# Copy uv-managed Python and openshift-virtualization-tests (with .venv) for tier2
+COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /opt/python/ /opt/python/
+COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /openshift-virtualization-tests /openshift-virtualization-tests
 
 # Create convenience symlinks for common commands
 RUN ln -s ${HOME}/manifests/run/generate.sh /usr/local/bin/generate && \
