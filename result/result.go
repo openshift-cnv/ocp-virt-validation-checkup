@@ -32,28 +32,27 @@ func New(junitResults map[string]junit.TestSuite) Result {
 			continue
 		}
 
-		// Count skipped tests from testsuite header OR individual test cases
-		skipped := testSuite.Skipped + testSuite.Disabled
+		// headerSkipped is the count from the testsuite XML attributes.
+		// Only this value should be used to adjust testsRun, because the
+		// header "tests" attribute includes skipped tests in pytest/SSP
+		// but excludes them in Ginkgo.
+		headerSkipped := testSuite.Skipped + testSuite.Disabled
 
-		// If testsuite header doesn't have skipped count, count individual skipped test cases
-		if skipped == 0 {
+		// displaySkipped is what we show in the summary. When the header
+		// doesn't report skipped counts (Ginkgo), fall back to counting
+		// individual testcase elements so the report still shows the total.
+		displaySkipped := headerSkipped
+		if displaySkipped == 0 {
 			for _, testCase := range testSuite.TestCases {
 				if testCase.Skipped {
-					skipped++
+					displaySkipped++
 				}
 			}
 		}
 
-		// Count both failures and errors as failures
 		totalFailures := testSuite.Failures + testSuite.Errors
-		passed := testSuite.Tests - totalFailures
-
-		// For SSP, exclude skipped tests from both run count and passed count
-		testsRun := testSuite.Tests
-		if sig == "ssp" {
-			testsRun = testSuite.Tests - skipped
-			passed = testsRun - totalFailures
-		}
+		testsRun := max(testSuite.Tests-headerSkipped, 0)
+		passed := max(testsRun-totalFailures, 0)
 
 		// Convert time from seconds to duration string format (rounded to whole seconds)
 		var durationStr string
@@ -68,7 +67,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 			Run:      testsRun,
 			Passed:   passed,
 			Failures: totalFailures,
-			Skipped:  skipped,
+			Skipped:  displaySkipped,
 			Duration: durationStr,
 		}
 
@@ -87,7 +86,7 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		res.Summary.Run += testsRun
 		res.Summary.Passed += passed
 		res.Summary.Failed += totalFailures
-		res.Summary.Skipped += skipped
+		res.Summary.Skipped += displaySkipped
 	}
 
 	return res

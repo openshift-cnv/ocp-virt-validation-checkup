@@ -144,12 +144,7 @@ else
   STORAGE_CLASS_CONFIG=""
 fi
 
-if [ "${DRY_RUN}" == "true" ]
-then
-  DRY_RUN_FLAG="--collect-only"
-else
-  DRY_RUN_FLAG=""
-fi
+DRY_RUN_FLAG=""
 
 # Check if cluster is running on hosted control plane
 CONTROL_PLANE_TOPOLOGY=$(oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}' 2>/dev/null || echo "")
@@ -204,36 +199,112 @@ fi
 
 echo "Starting tier2 tests 🧪"
 
-(set +e; .venv/bin/pytest \
-  -m "conformance" \
-  -W "ignore::pytest.PytestRemovedIn9Warning" \
-  --skip-artifactory-check \
-  --latest-rhel \
-  --tc=hco_subscription:${SUBSCRIPTION_NAME} \
-  --conformance-storage-class=${STORAGE_CLASS} \
-  ${STORAGE_CLASS_CONFIG} \
-  ${HCP_FLAG} \
-  -s -o log_cli=true \
-  ${DRY_RUN_FLAG} \
-  "${K_ARGS[@]}" \
-  --data-collector \
-  --data-collector-output-dir=${ARTIFACTS} \
-  --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
-  --junitxml="${ARTIFACTS}/junit.results.xml"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
+if [ "${DRY_RUN}" == "true" ]; then
+  # In dry-run mode, collect tests and generate a proper JUnit XML with all
+  # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
+  (set +e; .venv/bin/pytest \
+    -m "conformance" \
+    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    --skip-artifactory-check \
+    --latest-rhel \
+    --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+    --conformance-storage-class=${STORAGE_CLASS} \
+    ${STORAGE_CLASS_CONFIG} \
+    ${HCP_FLAG} \
+    --collect-only -q \
+    "${K_ARGS[@]}" \
+    2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
 
-# Store the PID for cleanup
-TEST_PID=$!
-echo "Tier2 test process started with PID: ${TEST_PID}"
+  TEST_PID=$!
+  echo "Tier2 test process started with PID: ${TEST_PID}"
+  wait ${TEST_PID} || true
 
-# Wait for the test to complete
-wait ${TEST_PID} || true
-
-# Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
-# since pytest -k deselection omits them from the report entirely.
-# Only count entries that match real conformance test names.
-# Exclude any entries that also appear in TEST_FOCUS (those were not skipped).
-if [ -n "${TEST_SKIPS}" ]; then
+  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
   .venv/bin/python -c "
+import subprocess, sys, socket
+from xml.etree.ElementTree import Element, SubElement, ElementTree
+from datetime import datetime, timezone
+
+log_path = sys.argv[1]
+junit_path = sys.argv[2]
+skip_entries = sys.argv[3].split('|') if sys.argv[3] else []
+focus_entries = sys.argv[4].split('|') if sys.argv[4] else []
+
+# Remove entries that are also in TEST_FOCUS (they were not skipped)
+skip_entries = [e for e in skip_entries if e not in focus_entries]
+
+with open(log_path) as f:
+    lines = f.readlines()
+
+test_ids = [l.strip() for l in lines if '::' in l and not l.startswith(('=', '-', ' '))]
+
+# Count TEST_SKIPS entries that match real conformance tests (these were
+# deselected by -k and don't appear in the collected list above).
+skipped_count = 0
+if skip_entries:
+    result = subprocess.run(
+        ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+        capture_output=True, text=True
+    )
+    all_collected = result.stdout
+    matched = [e for e in skip_entries if e in all_collected]
+    skipped_count = len(matched)
+    if matched:
+        print(f'TEST_SKIPS: {skipped_count} test(s) would be skipped: {matched}')
+
+total_tests = len(test_ids) + skipped_count
+
+testsuites = Element('testsuites', name='pytest tests')
+ts = SubElement(testsuites, 'testsuite',
+    name='pytest',
+    errors='0',
+    failures='0',
+    skipped=str(skipped_count),
+    tests=str(total_tests),
+    time='0.000',
+    timestamp=datetime.now(timezone.utc).isoformat(),
+    hostname=socket.gethostname(),
+)
+
+for tid in test_ids:
+    parts = tid.split('::')
+    module = parts[0].replace('/', '.').removesuffix('.py') if parts else ''
+    name = parts[-1] if parts else tid
+    classname = '.'.join(parts[:-1]).replace('/', '.').removesuffix('.py') if len(parts) > 1 else module
+    SubElement(ts, 'testcase', classname=classname, name=name, time='0.000')
+
+tree = ElementTree(testsuites)
+tree.write(junit_path, xml_declaration=True, encoding='unicode')
+print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collected, {skipped_count} skipped via TEST_SKIPS)')
+" "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS:-}" "${TEST_FOCUS:-}"
+
+else
+  (set +e; .venv/bin/pytest \
+    -m "conformance" \
+    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    --skip-artifactory-check \
+    --latest-rhel \
+    --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+    --conformance-storage-class=${STORAGE_CLASS} \
+    ${STORAGE_CLASS_CONFIG} \
+    ${HCP_FLAG} \
+    -s -o log_cli=true \
+    "${K_ARGS[@]}" \
+    --data-collector \
+    --data-collector-output-dir=${ARTIFACTS} \
+    --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
+    --junitxml="${ARTIFACTS}/junit.results.xml"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/tier2-log.txt &
+
+  TEST_PID=$!
+  echo "Tier2 test process started with PID: ${TEST_PID}"
+  wait ${TEST_PID} || true
+
+  # Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
+  # since pytest -k deselection omits them from the report entirely.
+  # Only count entries that match real conformance test names.
+  # Exclude any entries that also appear in TEST_FOCUS (those were not skipped).
+  if [ -n "${TEST_SKIPS}" ]; then
+    .venv/bin/python -c "
 import subprocess, sys, xml.etree.ElementTree as ET
 
 junit_path = sys.argv[1]
@@ -260,7 +331,9 @@ print(f'Matched {len(matched)} real test(s) to mark as skipped: {skipped_names}'
 if matched:
     tree = ET.parse(junit_path)
     for ts in tree.iter('testsuite'):
+        ts.set('tests', str(int(ts.get('tests', '0')) + len(matched)))
         ts.set('skipped', str(int(ts.get('skipped', '0')) + len(matched)))
     tree.write(junit_path, xml_declaration=True, encoding='unicode')
 " "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}" "${TEST_FOCUS}"
+  fi
 fi

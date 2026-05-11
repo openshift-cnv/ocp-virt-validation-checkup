@@ -34,11 +34,11 @@ func TestCreatesResultWithValidJUnitResults(t *testing.T) {
 	}
 
 	sig1 := res.SigMap["sig1"]
-	if sig1.Run != 5 {
-		t.Errorf("expected 5 tests run for sig1, got %d", sig1.Run)
+	if sig1.Run != 4 {
+		t.Errorf("expected 4 tests run for sig1 (5 total - 1 skipped), got %d", sig1.Run)
 	}
-	if sig1.Passed != 4 {
-		t.Errorf("expected 4 tests passed for sig1, got %d", sig1.Passed)
+	if sig1.Passed != 3 {
+		t.Errorf("expected 3 tests passed for sig1 (4 run - 1 failed), got %d", sig1.Passed)
 	}
 	if sig1.Failures != 1 {
 		t.Errorf("expected 1 failure for sig1, got %d", sig1.Failures)
@@ -81,11 +81,35 @@ func TestHandlesEmptyJUnitResults(t *testing.T) {
 	}
 }
 
-func TestHandlesSpecialSigLogicForSSP(t *testing.T) {
+func TestExcludesSkippedFromRunCountForAnySuite(t *testing.T) {
 	junitResults := map[string]junit.TestSuite{
-		"ssp": {
-			Tests:    4,
+		"tier2": {
+			Tests:    10,
 			Failures: 1,
+			Skipped:  3,
+			Disabled: 0,
+		},
+	}
+
+	res := result.New(junitResults)
+
+	sig := res.SigMap["tier2"]
+	if sig.Run != 7 {
+		t.Errorf("expected 7 tests run (10 total - 3 skipped), got %d", sig.Run)
+	}
+	if sig.Passed != 6 {
+		t.Errorf("expected 6 tests passed (7 run - 1 failed), got %d", sig.Passed)
+	}
+	if sig.Failures != 1 {
+		t.Errorf("expected 1 failure, got %d", sig.Failures)
+	}
+}
+
+func TestAllTestsSkippedDoesNotProduceNegativeCounts(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"tier2": {
+			Tests:    0,
+			Failures: 0,
 			Skipped:  2,
 			Disabled: 0,
 		},
@@ -93,15 +117,46 @@ func TestHandlesSpecialSigLogicForSSP(t *testing.T) {
 
 	res := result.New(junitResults)
 
-	sig := res.SigMap["ssp"]
-	if sig.Run != 2 {
-		t.Errorf("expected 2 tests run for ssp (4 total - 2 skipped), got %d", sig.Run)
+	sig := res.SigMap["tier2"]
+	if sig.Run != 0 {
+		t.Errorf("expected 0 tests run (all skipped), got %d", sig.Run)
 	}
-	if sig.Passed != 1 {
-		t.Errorf("expected 1 test passed for ssp (2 run - 1 failed), got %d", sig.Passed)
+	if sig.Passed != 0 {
+		t.Errorf("expected 0 tests passed, got %d", sig.Passed)
 	}
-	if sig.Failures != 1 {
-		t.Errorf("expected 1 failure for ssp, got %d", sig.Failures)
+	if sig.Skipped != 2 {
+		t.Errorf("expected 2 skipped, got %d", sig.Skipped)
+	}
+}
+
+func TestGinkgoSkippedOnlyInTestcasesDoesNotAffectRunCount(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"network": {
+			Tests:    18,
+			Failures: 1,
+			Skipped:  0,
+			Disabled: 0,
+			TestCases: []junit.TestCase{
+				{Name: "test1", Failure: true},
+				{Name: "test2"},
+				{Name: "skipped1", Skipped: true},
+				{Name: "skipped2", Skipped: true},
+				{Name: "skipped3", Skipped: true},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+
+	sig := res.SigMap["network"]
+	if sig.Run != 18 {
+		t.Errorf("expected 18 tests run (header skipped=0, testcase skips should not reduce run count), got %d", sig.Run)
+	}
+	if sig.Passed != 17 {
+		t.Errorf("expected 17 tests passed (18 run - 1 failed), got %d", sig.Passed)
+	}
+	if sig.Skipped != 3 {
+		t.Errorf("expected 3 skipped for display (from testcase elements), got %d", sig.Skipped)
 	}
 }
 
