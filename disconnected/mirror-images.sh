@@ -186,8 +186,7 @@ setup_internal_registry() {
     login_token=$(oc whoami -t)
   fi
 
-  echo "${login_token}" | podman login -u "${login_user}" --password-stdin "${MIRROR_REGISTRY}" \
-    --tls-verify=false
+  oc registry login --registry="${MIRROR_REGISTRY}" --auth-basic="${login_user}:${login_token}" --insecure=true
 
   TLS_VERIFY=false
 }
