@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,10 +73,11 @@ func New(junitResults map[string]junit.TestSuite) Result {
 		}
 
 		if totalFailures > 0 {
-			var failedTests []string
+			failedTests := make(map[string][]string)
 			for _, testCase := range testSuite.TestCases {
 				if testCase.Failure || testCase.Error {
-					failedTests = append(failedTests, testCase.Name)
+					category := extractCategory(testCase.Classname)
+					failedTests[category] = append(failedTests[category], testCase.Name)
 				}
 			}
 
@@ -97,12 +99,49 @@ type SigMap map[string]Sig
 
 // Sig represents the result of a test suite, including the number of tests run, passed, failed, and skipped.
 type Sig struct {
-	Run         int      `json:"tests_run"`
-	Passed      int      `json:"tests_passed"`
-	Failures    int      `json:"tests_failures"`
-	Skipped     int      `json:"tests_skipped"`
-	Duration    string   `json:"tests_duration,omitempty"`
-	FailedTests []string `json:"failed_tests,omitempty"`
+	Run         int            `json:"tests_run"`
+	Passed      int            `json:"tests_passed"`
+	Failures    int            `json:"tests_failures"`
+	Skipped     int            `json:"tests_skipped"`
+	Duration    string         `json:"tests_duration,omitempty"`
+	FailedTests FailedTestsMap `json:"failed_tests,omitempty"`
+}
+
+// FailedTestsMap holds failed test names grouped by category.
+// An empty-string key means the test has no category (e.g. Ginkgo suites).
+// JSON/YAML: serialises as a flat []string when there is only the
+// uncategorised bucket, and as map[string][]string otherwise, so that
+// existing consumers of the ConfigMap are not broken by this change.
+type FailedTestsMap map[string][]string
+
+func (f FailedTestsMap) MarshalJSON() ([]byte, error) {
+	if f.isFlat() {
+		return json.Marshal(f[""])
+	}
+	return json.Marshal(map[string][]string(f))
+}
+
+func (f *FailedTestsMap) UnmarshalJSON(data []byte) error {
+	var flat []string
+	if err := json.Unmarshal(data, &flat); err == nil {
+		*f = FailedTestsMap{"": flat}
+		return nil
+	}
+
+	var m map[string][]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*f = FailedTestsMap(m)
+	return nil
+}
+
+func (f FailedTestsMap) isFlat() bool {
+	if len(f) != 1 {
+		return false
+	}
+	_, ok := f[""]
+	return ok
 }
 
 type Summary struct {
@@ -172,9 +211,7 @@ func (r Result) String() string {
 
 		if len(sigRes.FailedTests) > 0 {
 			sb.WriteString("Failed Tests:\n")
-			for _, testName := range sigRes.FailedTests {
-				sb.WriteString(fmt.Sprintf("  - %s\n", testName))
-			}
+			writeFailedTests(&sb, sigRes.FailedTests)
 		}
 	}
 
@@ -193,6 +230,65 @@ func (r Result) String() string {
 	sb.WriteString(fmt.Sprintf("Total Tests Skipped: %d\n", r.Summary.Skipped))
 
 	return sb.String()
+}
+
+// writeFailedTests writes the failed tests map to the string builder.
+// When all tests share a single uncategorized bucket (empty key), a flat list is produced.
+// Otherwise, tests are grouped under sorted category headings.
+func writeFailedTests(sb *strings.Builder, failedTests map[string][]string) {
+	_, hasUncategorized := failedTests[""]
+	if len(failedTests) == 1 && hasUncategorized {
+		for _, testName := range failedTests[""] {
+			sb.WriteString(fmt.Sprintf("  - %s\n", testName))
+		}
+		return
+	}
+
+	categories := make([]string, 0, len(failedTests))
+	for cat := range failedTests {
+		categories = append(categories, cat)
+	}
+	sort.Strings(categories)
+
+	for _, cat := range categories {
+		label := cat
+		if label == "" {
+			label = "uncategorized"
+		}
+		sb.WriteString(fmt.Sprintf("  %s:\n", label))
+		for _, testName := range failedTests[cat] {
+			sb.WriteString(fmt.Sprintf("    - %s\n", testName))
+		}
+	}
+}
+
+// extractCategory derives a SIG category from a pytest classname.
+// Pytest classnames follow the pattern "tests.<category>.<subpath>...",
+// e.g. "tests.storage.test_hotplug.TestHotPlugWithPersist" → "storage".
+// For "virt", the second level is included to distinguish sub-areas,
+// e.g. "tests.virt.cluster.general.test_smbios" → "virt/cluster",
+//
+//	"tests.virt.node.cpu_sockets_threads.test_cpu" → "virt/node".
+//
+// Returns an empty string for non-pytest classnames (e.g. Ginkgo's "Tests Suite").
+func extractCategory(classname string) string {
+	const prefix = "tests."
+	if !strings.HasPrefix(classname, prefix) {
+		return ""
+	}
+
+	rest := classname[len(prefix):]
+	parts := strings.SplitN(rest, ".", 3)
+	if len(parts) == 0 {
+		return ""
+	}
+
+	category := parts[0]
+	if category == "virt" && len(parts) >= 2 {
+		return category + "/" + parts[1]
+	}
+
+	return category
 }
 
 // GetYaml converts the Result struct to YAML format.

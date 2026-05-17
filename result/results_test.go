@@ -2,9 +2,11 @@ package result_test
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+
 	"junitparser/junit_parser/junit"
 	"junitparser/result"
-	"testing"
 )
 
 func TestCreatesResultWithValidJUnitResults(t *testing.T) {
@@ -15,8 +17,8 @@ func TestCreatesResultWithValidJUnitResults(t *testing.T) {
 			Skipped:  1,
 			Disabled: 0,
 			TestCases: []junit.TestCase{
-				{Name: "test1", Failure: true},
-				{Name: "test2"},
+				{Name: "test1", Classname: "Tests Suite", Failure: true},
+				{Name: "test2", Classname: "Tests Suite"},
 			},
 		},
 		"sig2": {
@@ -43,8 +45,9 @@ func TestCreatesResultWithValidJUnitResults(t *testing.T) {
 	if sig1.Failures != 1 {
 		t.Errorf("expected 1 failure for sig1, got %d", sig1.Failures)
 	}
-	if len(sig1.FailedTests) != 1 || sig1.FailedTests[0] != "test1" {
-		t.Errorf("expected failed test 'test1' for sig1, got %v", sig1.FailedTests)
+	uncategorized := sig1.FailedTests[""]
+	if len(uncategorized) != 1 || uncategorized[0] != "test1" {
+		t.Errorf("expected failed test 'test1' under empty category for sig1, got %v", sig1.FailedTests)
 	}
 
 	sig2 := res.SigMap["sig2"]
@@ -168,7 +171,7 @@ func TestMarshalsResultToJSONCorrectly(t *testing.T) {
 			Skipped:  0,
 			Disabled: 0,
 			TestCases: []junit.TestCase{
-				{Name: "test1", Failure: true},
+				{Name: "test1", Classname: "Tests Suite", Failure: true},
 			},
 		},
 	}
@@ -240,6 +243,144 @@ func TestSetupFailureWithOtherValidSuites(t *testing.T) {
 	}
 }
 
+func TestCategorizesFailedTestsByClassname(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"tier2": {
+			Tests:    5,
+			Failures: 3,
+			Skipped:  0,
+			Disabled: 0,
+			TestCases: []junit.TestCase{
+				{Name: "test_hotplug_volume", Classname: "tests.storage.test_hotplug.TestHotPlug", Failure: true},
+				{Name: "test_smbios_default", Classname: "tests.virt.cluster.general.test_smbios", Failure: true},
+				{Name: "test_namespace_health", Classname: "tests.after_cluster_deploy_sanity.test_sanity", Failure: true},
+				{Name: "test_passing", Classname: "tests.virt.node.test_node"},
+				{Name: "test_also_passing", Classname: "tests.storage.test_resize"},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+
+	sig := res.SigMap["tier2"]
+	if sig.Failures != 3 {
+		t.Errorf("expected 3 failures, got %d", sig.Failures)
+	}
+
+	if len(sig.FailedTests) != 3 {
+		t.Errorf("expected 3 categories, got %d: %v", len(sig.FailedTests), sig.FailedTests)
+	}
+
+	storageTests := sig.FailedTests["storage"]
+	if len(storageTests) != 1 || storageTests[0] != "test_hotplug_volume" {
+		t.Errorf("expected storage category with 'test_hotplug_volume', got %v", storageTests)
+	}
+
+	virtTests := sig.FailedTests["virt/cluster"]
+	if len(virtTests) != 1 || virtTests[0] != "test_smbios_default" {
+		t.Errorf("expected virt/cluster category with 'test_smbios_default', got %v", virtTests)
+	}
+
+	sanityTests := sig.FailedTests["after_cluster_deploy_sanity"]
+	if len(sanityTests) != 1 || sanityTests[0] != "test_namespace_health" {
+		t.Errorf("expected after_cluster_deploy_sanity category with 'test_namespace_health', got %v", sanityTests)
+	}
+}
+
+func TestCategorizedStringOutputIsHierarchical(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"tier2": {
+			Tests:    4,
+			Failures: 3,
+			Skipped:  0,
+			Disabled: 0,
+			TestCases: []junit.TestCase{
+				{Name: "test_hotplug", Classname: "tests.storage.test_hotplug.TestHotPlug", Failure: true},
+				{Name: "test_smbios", Classname: "tests.virt.cluster.general.test_smbios", Failure: true},
+				{Name: "test_cpu", Classname: "tests.virt.node.cpu_sockets_threads.test_cpu", Failure: true},
+				{Name: "test_passing", Classname: "tests.virt.node.test_node"},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+	output := res.String()
+
+	if !strings.Contains(output, "  storage:\n") {
+		t.Errorf("expected output to contain 'storage:' category header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "  virt/cluster:\n") {
+		t.Errorf("expected output to contain 'virt/cluster:' category header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "  virt/node:\n") {
+		t.Errorf("expected output to contain 'virt/node:' category header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "    - test_hotplug") {
+		t.Errorf("expected output to contain indented test_hotplug, got:\n%s", output)
+	}
+	if !strings.Contains(output, "    - test_smbios") {
+		t.Errorf("expected output to contain indented test_smbios, got:\n%s", output)
+	}
+	if !strings.Contains(output, "    - test_cpu") {
+		t.Errorf("expected output to contain indented test_cpu, got:\n%s", output)
+	}
+}
+
+func TestUncategorizedStringOutputIsFlat(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"compute": {
+			Tests:    2,
+			Failures: 1,
+			Skipped:  0,
+			Disabled: 0,
+			TestCases: []junit.TestCase{
+				{Name: "test_migration", Classname: "Tests Suite", Failure: true},
+				{Name: "test_passing", Classname: "Tests Suite"},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+	output := res.String()
+
+	if !strings.Contains(output, "  - test_migration") {
+		t.Errorf("expected output to contain flat '  - test_migration', got:\n%s", output)
+	}
+	if strings.Contains(output, ":\n    -") {
+		t.Errorf("expected no category headers in uncategorized output, got:\n%s", output)
+	}
+}
+
+func TestCategorizedJSONOutputUsesMap(t *testing.T) {
+	junitResults := map[string]junit.TestSuite{
+		"tier2": {
+			Tests:    3,
+			Failures: 2,
+			Skipped:  0,
+			Disabled: 0,
+			TestCases: []junit.TestCase{
+				{Name: "test_hotplug", Classname: "tests.storage.test_hotplug.TestHotPlug", Failure: true},
+				{Name: "test_smbios", Classname: "tests.virt.cluster.general.test_smbios", Failure: true},
+				{Name: "test_passing", Classname: "tests.virt.node.test_node"},
+			},
+		},
+	}
+
+	res := result.New(junitResults)
+	jsonData, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("unexpected error marshaling result to JSON: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	if !strings.Contains(jsonStr, `"storage":["test_hotplug"]`) {
+		t.Errorf("expected JSON to contain categorized storage tests, got %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"virt/cluster":["test_smbios"]`) {
+		t.Errorf("expected JSON to contain categorized virt/cluster tests, got %s", jsonStr)
+	}
+}
+
 func TestConvertsResultToYAMLCorrectly(t *testing.T) {
 	junitResults := map[string]junit.TestSuite{
 		"sig1": {
@@ -248,7 +389,7 @@ func TestConvertsResultToYAMLCorrectly(t *testing.T) {
 			Skipped:  0,
 			Disabled: 0,
 			TestCases: []junit.TestCase{
-				{Name: "test1", Failure: true},
+				{Name: "test1", Classname: "Tests Suite", Failure: true},
 			},
 		},
 	}
