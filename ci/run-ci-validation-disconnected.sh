@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== Pre-flight checks ==="
-for cmd in oc podman jq; do
+for cmd in oc jq; do
   if ! command -v "${cmd}" &>/dev/null; then
     echo "Error: ${cmd} is required but not found in PATH"
     exit 1
@@ -52,7 +52,7 @@ for registry in registry.redhat.io quay.io/openshift-virtualization/konflux-buil
     continue
   fi
   AUTH=$(echo "${AUTH_B64}" | base64 -d)
-  echo "${AUTH#*:}" | podman login -u "${AUTH%%:*}" --password-stdin "${registry}"
+  oc registry login --registry="${registry}" --auth-basic="${AUTH%%:*}:${AUTH#*:}"
 done
 
 if [ "${SKIP_MIRROR_SETUP}" != "true" ]; then
@@ -80,7 +80,7 @@ fi
 echo "=== Authenticating to internal registry ==="
 INTERNAL_REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}')
 LOGIN_TOKEN=$(oc create token registry-pusher -n kubevirt-mirror --duration=1h)
-echo "${LOGIN_TOKEN}" | podman login -u unused --password-stdin "${INTERNAL_REGISTRY}" --tls-verify=false
+oc registry login --registry="${INTERNAL_REGISTRY}" --auth-basic="unused:${LOGIN_TOKEN}" --insecure=true
 
 if [ -n "${OCP_VIRT_VALIDATION_IMAGE:-}" ]; then
   echo "=== Mirroring checkup image to internal registry ==="
