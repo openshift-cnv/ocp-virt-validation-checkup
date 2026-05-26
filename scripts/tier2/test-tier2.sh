@@ -197,13 +197,24 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
+# Build pytest marker expression
+# Note: Windows tests require @pytest.mark.windows marker in openshift-virtualization-tests
+# When Windows tests are added with this marker, they will be automatically included
+# when ACCEPT_WINDOWS_EULA=true
+MARKERS="conformance"
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  echo "Windows EULA accepted - Windows tests will be included when available"
+  MARKERS="${MARKERS} or windows"
+fi
+
 echo "Starting tier2 tests 🧪"
+echo "Using markers: ${MARKERS}"
 
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
   (set +e; .venv/bin/pytest \
-    -m "conformance" \
+    -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn9Warning" \
     --skip-artifactory-check \
     --latest-rhel \
@@ -280,7 +291,7 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
 
 else
   (set +e; .venv/bin/pytest \
-    -m "conformance" \
+    -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn9Warning" \
     --skip-artifactory-check \
     --latest-rhel \
