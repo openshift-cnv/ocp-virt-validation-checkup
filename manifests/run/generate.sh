@@ -18,6 +18,10 @@ TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp,tier2"}
 FULL_SUITE=${FULL_SUITE:-"false"}
 STORAGE_CLASS=${STORAGE_CLASS:-""}
 STORAGE_CAPABILITIES=${STORAGE_CAPABILITIES:-""}
+ACCEPT_WINDOWS_EULA=${ACCEPT_WINDOWS_EULA:-"false"}
+WIN_IMAGE_DOWNLOAD_URL=${WIN_IMAGE_DOWNLOAD_URL:-""}
+WIN_IMAGE_NAME=${WIN_IMAGE_NAME:-""}
+TEKTON_PIPELINE_VERSION=${TEKTON_PIPELINE_VERSION:-""}
 
 # Calculate storage size based on test suites (2Gi per suite, 10Gi for tier2)
 IFS=',' read -ra TEST_SUITES_ARRAY <<< "${TEST_SUITES}"
@@ -216,6 +220,14 @@ spec:
               value: ${STORAGE_CLASS}
             - name: STORAGE_CAPABILITIES
               value: ${STORAGE_CAPABILITIES}
+            - name: ACCEPT_WINDOWS_EULA
+              value: "${ACCEPT_WINDOWS_EULA}"
+            - name: WIN_IMAGE_DOWNLOAD_URL
+              value: "${WIN_IMAGE_DOWNLOAD_URL}"
+            - name: WIN_IMAGE_NAME
+              value: "${WIN_IMAGE_NAME}"
+            - name: TEKTON_PIPELINE_VERSION
+              value: "${TEKTON_PIPELINE_VERSION}"
           volumeMounts:
             - name: results-volume
               mountPath: /results
