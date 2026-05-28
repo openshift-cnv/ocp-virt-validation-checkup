@@ -65,7 +65,7 @@ if [[ -n "${TEST_FOCUS}" && -n "${TEST_SKIPS}" ]]; then
   for f in "${focus_entries[@]}"; do
     for s in "${skip_entries[@]}"; do
       if [[ "${f}" == "${s}" ]]; then
-        echo "WARNING: '${f}' appears in both TEST_FOCUS and TEST_SKIPS. TEST_FOCUS takes precedence; test will run."
+        echo "WARNING: '${f}' appears in both TEST_FOCUS and TEST_SKIPS. TEST_FOCUS takes precedence; test will run." >&2
       fi
     done
   done
