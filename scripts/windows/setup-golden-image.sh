@@ -462,6 +462,8 @@ if ! oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
   oc create namespace "${GOLDEN_IMAGE_NAMESPACE}"
 fi
 
+oc label namespace "${GOLDEN_IMAGE_NAMESPACE}" pod-security.kubernetes.io/enforce=privileged --overwrite
+
 # Step 4: Check if golden image DataSource already exists
 echo "Checking if Windows golden image already exists..."
 if oc get datasource "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
