@@ -193,11 +193,6 @@ setup_internal_registry() {
 
 get_mirror_flags() {
   local flags=""
-  if [ "${USE_INTERNAL_REGISTRY}" = true ]; then
-    flags+="--filter-by-os=linux/amd64 "
-  else
-    flags+="--keep-manifest-list=true "
-  fi
   if [ "${TLS_VERIFY}" = false ]; then
     flags+="--insecure=true "
   fi
@@ -229,7 +224,7 @@ mirror_kubevirt_images() {
     echo "  ${source}"
     echo "  -> ${target}"
 
-    if oc image mirror ${flags} \
+    if oc image mirror --keep-manifest-list=true ${flags} \
       "${source}" "${target}" 2>&1; then
       echo "  OK"
     else
@@ -268,7 +263,7 @@ mirror_tier2_images() {
     echo "  ${full_image}"
     echo "  -> ${target}"
 
-    if oc image mirror ${flags} \
+    if oc image mirror --keep-manifest-list=true ${flags} \
       "${full_image}" "${target}" 2>&1; then
       echo "  OK"
     else
@@ -306,7 +301,7 @@ mirror_other_images() {
     echo "  ${full_image}"
     echo "  -> ${target}"
 
-    if oc image mirror ${flags} \
+    if oc image mirror --keep-manifest-list=true ${flags} \
       "${full_image}" "${target}" 2>&1; then
       echo "  OK"
     else
