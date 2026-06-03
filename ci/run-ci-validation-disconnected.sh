@@ -32,6 +32,7 @@ fi
 echo "> Pre-flight checks passed"
 
 echo "=== Cleaning up previous runs ==="
+for node in $(oc get node -o NAME); do oc debug -n default "${node}" -- chroot /host crictl rmi --prune; done || true
 oc delete imagetagmirrorset ocp-virt-validation-mirrors --ignore-not-found=true || true
 oc delete imagedigestmirrorset ocp-virt-validation-digest-mirrors --ignore-not-found=true || true
 oc delete namespace kubevirt-mirror --ignore-not-found=true --wait=true || true
