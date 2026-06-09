@@ -202,9 +202,13 @@ fi
 # When Windows tests are added with this marker, they will be automatically included
 # when ACCEPT_WINDOWS_EULA=true
 MARKERS="conformance"
+WIN_IMAGE_FLAG=""
 if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
   echo "Windows EULA accepted - Windows tests will be included when available"
   MARKERS="${MARKERS} or windows"
+  # WIN_USERNAME/WIN_PASSWORD: defaults match setup-golden-image.sh output (Administrator/Heslo123),
+  # but can be overridden for custom golden images with different credentials
+  WIN_IMAGE_FLAG="--tc=win_golden_image_name:${WIN_IMAGE_NAME:-windows2022-golden-image} --tc=os_login_param.win.username:${WIN_USERNAME:-Administrator} --tc=os_login_param.win.password:${WIN_PASSWORD:-Heslo123} --tc=storage_class_a:${STORAGE_CLASS} --tc=storage_class_b:${STORAGE_CLASS}"
 fi
 
 echo "Starting tier2 tests 🧪"
@@ -222,6 +226,7 @@ if [ "${DRY_RUN}" == "true" ]; then
     --conformance-storage-class=${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${WIN_IMAGE_FLAG} \
     --collect-only -q \
     "${K_ARGS[@]}" \
     2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
@@ -299,6 +304,7 @@ else
     --conformance-storage-class=${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${WIN_IMAGE_FLAG} \
     -s -o log_cli=true \
     "${K_ARGS[@]}" \
     --data-collector \
