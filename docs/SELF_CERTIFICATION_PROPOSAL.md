@@ -51,7 +51,6 @@ The self-validation suite currently runs **71 storage tests**, picked up by the 
 | Storage Migration | 1 | StorageCritical | Minimal -- only block RWX DV migration |
 | ImageUpload | 1 | StorageCritical | Minimal |
 | Guestfs | 1 | conformance | Minimal |
-| **CBT** | **0** | - | **Not covered** |
 | **DataVolume lifecycle** | **1** | conformance | **Minimal** -- only start/stop, no expansion/fstrim/concurrent/cleanup |
 | **Storage fundamentals** | **0** | - | **Not covered** -- no emptyDisk, ephemeral, hostdisk, shareable, block I/O |
 
@@ -161,7 +160,6 @@ The self-validation suite currently runs **71 storage tests**, picked up by the 
 
 | Category | Current | Gap | Impact |
 |----------|---------|-----|--------|
-| **CBT (Changed Block Tracking)** | 0 tests | Full gap | Incremental backups impossible to validate. Without CBT, every backup is a full copy. |
 | **Backup** | 1 test (PENDING) | 4 tests missing | No full backup, no pull mode, no data integrity validation. Enterprise DR is untested. |
 | **Storage Migration** | 1 test | 5 tests missing | Only block RWX tested. No DV-to-PVC, no metrics, no filesystem migration, no containerdisk. |
 | **DataVolume Lifecycle** | 1 test | 7 tests missing | No PVC expansion, no concurrent VMIs, no fstrim, no cleanup validation, no sourceRef. |
@@ -179,9 +177,11 @@ The self-validation suite currently runs **71 storage tests**, picked up by the 
 
 ---
 
-## Proposed Additions: 22 Tests
+## Proposed Additions: 18 Tests
 
-Based on the verified current state, the following **22 tests** are needed to close the remaining gaps. Tests that were in the original 50-test proposal but are already running have been removed.
+Based on the verified current state, the following **18 tests** are needed to close the remaining gaps. Tests that were in the original 50-test proposal but are already running have been removed.
+
+> **Note:** CBT (Changed Block Tracking) tests were originally in this proposal but removed. CBT requires cluster-level feature enablement that is not universally available, making those tests unsuitable for the self-validation suite. CBT coverage should be addressed separately once the feature is GA and broadly enabled.
 
 ---
 
@@ -200,22 +200,7 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 ---
 
-### Category 2: CBT - Changed Block Tracking - 4 tests to add
-
-**Why:** CBT has **zero coverage**. Changed Block Tracking enables incremental backups by identifying which disk blocks changed since the last backup. Without CBT validation, providers cannot confirm that incremental backup infrastructure works on their storage.
-
-**File:** [`tests/storage/cbt.go`](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/cbt.go)
-
-| # | Line | Test Name | Why Selected |
-|---|------|-----------|---|
-| 5 | [71](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/cbt.go#L71) | "VM matches cbt label selector, then unmatches" | Validates that CBT can be enabled and disabled per-VM via labels. |
-| 6 | [196](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/cbt.go#L196) | "should create CBT overlay for hotplug volume and remove it on unplug" | Hotplugged volumes must also be tracked by CBT. |
-| 7 | [268](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/cbt.go#L268) | "should persist CBT data across restart" | CBT state must survive VM restarts. |
-| 8 | [284](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/cbt.go#L284) | "should persist CBT data across live migration" | CBT state must survive live migration. |
-
----
-
-### Category 3: DataVolume Lifecycle - 6 tests to add
+### Category 2: DataVolume Lifecycle - 6 tests to add
 
 **Why:** The current DataVolume tests are entirely clone RBAC (conformance) and one start/stop test. PVC expansion, concurrent VM startup, cleanup, sourceRef resolution, and fstrim (thin provisioning) are all missing. These are basic day-1 and day-2 operations that every provider's storage must support.
 
@@ -223,16 +208,16 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 | # | Line | Test Name | Why Selected |
 |---|------|-----------|---|
-| 9 | [125](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L125) | "PVC expansion is detected by VM and can be fully used" | Volume expansion is a GA requirement. The VM must see and use additional space. |
-| 10 | [208](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L208) | "Check disk expansion accounts for actual usable size" | Some providers report capacity differently than usable space. |
-| 11 | [305](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L305) | "should successfully start multiple concurrent VMIs" | Validates concurrent volume provisioning -- common when scaling workloads. |
-| 12 | [619](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L619) | "deleting VM should automatically delete DataVolumes and VMI owned by VM" | Cleanup correctness -- orphaned volumes waste storage. |
-| 13 | [836](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L836) | "should resolve DataVolume sourceRef" | SourceRef is used for golden image workflows. |
-| 14 | [1019](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L1019) | "fstrim from the VM influences disk.img" | Validates thin provisioning support. Without fstrim, disk images grow monotonically. |
+| 5 | [125](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L125) | "PVC expansion is detected by VM and can be fully used" | Volume expansion is a GA requirement. The VM must see and use additional space. |
+| 6 | [208](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L208) | "Check disk expansion accounts for actual usable size" | Some providers report capacity differently than usable space. |
+| 7 | [305](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L305) | "should successfully start multiple concurrent VMIs" | Validates concurrent volume provisioning -- common when scaling workloads. |
+| 8 | [619](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L619) | "deleting VM should automatically delete DataVolumes and VMI owned by VM" | Cleanup correctness -- orphaned volumes waste storage. |
+| 9 | [836](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L836) | "should resolve DataVolume sourceRef" | SourceRef is used for golden image workflows. |
+| 10 | [1019](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/datavolume.go#L1019) | "fstrim from the VM influences disk.img" | Validates thin provisioning support. Without fstrim, disk images grow monotonically. |
 
 ---
 
-### Category 4: Storage Migration - 2 tests to add
+### Category 3: Storage Migration - 2 tests to add
 
 **Why:** Only 1 migration test exists (block RWX). DV-to-DV migration and cross-mode migration (block to filesystem) are the most common migration scenarios during storage upgrades and are not tested.
 
@@ -240,12 +225,12 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 | # | Line | Test Name | Why Selected |
 |---|------|-----------|---|
-| 15 | [374](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/migration.go#L374) | "should migrate the source volume from a source DV to a destination DV" | DV-to-DV migration, the most common pattern when both sides are managed by CDI. |
-| 16 | [604](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/migration.go#L604) | "should migrate the source volume from a block source and filesystem destination DVs" | Cross-mode migration. Common when moving between storage providers. |
+| 11 | [374](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/migration.go#L374) | "should migrate the source volume from a source DV to a destination DV" | DV-to-DV migration, the most common pattern when both sides are managed by CDI. |
+| 12 | [604](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/migration.go#L604) | "should migrate the source volume from a block source and filesystem destination DVs" | Cross-mode migration. Common when moving between storage providers. |
 
 ---
 
-### Category 5: Storage Fundamentals - 6 tests to add
+### Category 4: Storage Fundamentals - 6 tests to add
 
 **Why:** Zero coverage. These tests validate the most basic storage primitives that all other operations depend on. If emptyDisk, ephemeral PVC, or block I/O don't work, higher-level tests (backup, snapshot, migration) will also fail with less clear error messages. Including fundamentals gives providers a clear signal when something is wrong at the base layer.
 
@@ -253,12 +238,12 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 | # | Line | Test Name | Why Selected |
 |---|------|-----------|---|
-| 17 | [290](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L290) | "should create a writeable emptyDisk with the right capacity" | EmptyDisk is the simplest volume type. If this fails, the provider has a fundamental issue. |
-| 18 | [327](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L327) | "should create a writeable emptyDisk with the specified serial number" | Serial numbers are used by guest OS for device identification. |
-| 19 | [393](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L393) | "started with Ephemeral PVC" | Ephemeral PVCs are used for stateless workloads. Validates copy-on-write. |
-| 20 | [578](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L578) | "should start with multiple hostdisks in the same directory" | Multiple hostdisks test concurrent volume mounts -- catches filesystem locking issues. |
-| 21 | [1122](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L1122) | "should successfully start 2 VMs with a shareable disk" | Shared disks (RWX) are used for clustered applications. |
-| 22 | [1132](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L1132) | "should successfully write and read data" (block) | Raw block I/O is required for high-performance workloads. |
+| 13 | [290](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L290) | "should create a writeable emptyDisk with the right capacity" | EmptyDisk is the simplest volume type. If this fails, the provider has a fundamental issue. |
+| 14 | [327](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L327) | "should create a writeable emptyDisk with the specified serial number" | Serial numbers are used by guest OS for device identification. |
+| 15 | [393](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L393) | "started with Ephemeral PVC" | Ephemeral PVCs are used for stateless workloads. Validates copy-on-write. |
+| 16 | [578](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L578) | "should start with multiple hostdisks in the same directory" | Multiple hostdisks test concurrent volume mounts -- catches filesystem locking issues. |
+| 17 | [1122](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L1122) | "should successfully start 2 VMs with a shareable disk" | Shared disks (RWX) are used for clustered applications. |
+| 18 | [1132](https://github.com/kubevirt/kubevirt/blob/main/tests/storage/storage.go#L1132) | "should successfully write and read data" (block) | Raw block I/O is required for high-performance workloads. |
 
 ---
 
@@ -266,19 +251,18 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Tests in Self-Validation | 71 | 93 |
-| Categories with 0 or minimal coverage | 5 | 0 |
+| Tests in Self-Validation | 71 | 89 |
+| Categories with 0 or minimal coverage | 4 | 0 |
 
 ### Proposed Tests by Category
 
 | Category | Tests to Add | Current Tests | After |
 |----------|-------------|---------------|-------|
 | Backup | 4 | 1 | 5 |
-| CBT | 4 | 0 | 4 |
 | DataVolume Lifecycle | 6 | 1 | 7 |
 | Storage Migration | 2 | 1 | 3 |
 | Storage Fundamentals | 6 | 0 | 6 |
-| **Total to add** | **22** | | |
+| **Total to add** | **18** | | |
 
 ---
 
@@ -289,11 +273,11 @@ Based on the verified current state, the following **22 tests** are needed to cl
 | Spin up VM (Linux) | Existing compute conformance tests | - |
 | Spin up VM (Windows) | Not in scope | Windows tests need separate discussion |
 | VM from Upload / Import / Registry | #70 (ImageUpload) | Partially covered; HTTP/registry import not tested |
-| VM from Golden Images | #13 (sourceRef), clone RBAC tests | Partial |
-| Volume Expansion | Proposed #9, #10 | Will be covered |
+| VM from Golden Images | #9 (sourceRef), clone RBAC tests | Partial |
+| Volume Expansion | Proposed #5, #6 | Will be covered |
 | Snapshot & Restore | #59-65 (snapshot), #39-49 (restore) -- already 18 tests | Covered |
-| Backup & Restore (OADP) | Proposed #1-4 (backup), proposed #5-8 (CBT) | Will be covered |
-| Storage Live Migration | #69 (existing) + proposed #15, #16 | Will be covered |
+| Backup & Restore (OADP) | Proposed #1-4 (backup) | Backup covered; CBT deferred (requires cluster-level enablement) |
+| Storage Live Migration | #69 (existing) + proposed #11, #12 | Will be covered |
 | Hotplug Volumes | 27 tests already running | Covered |
 | 20 VMs x 4 disks simultaneously | Not in scope | Requires custom scale tests |
 | 4 VMs snapshot/restore concurrently | Not in scope | Requires custom concurrency tests |
@@ -306,6 +290,7 @@ Based on the verified current state, the following **22 tests** are needed to cl
 
 | Category | Reason |
 |----------|--------|
+| CBT (Changed Block Tracking) | Requires cluster-level feature enablement not universally available. Should be added once CBT is GA and broadly enabled. |
 | Negative tests ("should fail...", "should reject...") | Per the guiding principle: we validate that infrastructure works, not that it correctly rejects bad input. |
 | Quarantined tests | Tests in quarantine have known instability. |
 | Redundant tests | Each test validates a distinct operation. No duplicates. |
