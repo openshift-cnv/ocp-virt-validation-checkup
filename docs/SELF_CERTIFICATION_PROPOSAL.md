@@ -4,8 +4,8 @@
 
 Create a self-certification suite that proves storage infrastructure works well for virtualization, enabling cloud providers to validate their environment without Red Hat running tests.
 
-**Guiding Principle (from @ngavrilo):**
-> "Our goal is to include tests in the self validation suite that cover what we believe is important, tests that check that the infrastructure, cloud and provided storage functions well and supports virtualization. Not simply running as much tests as possible, nor testing negative cases for features."
+**Guiding Principle :**
+> "Our goal is to include tests in the self validation suite that cover what we believe is important, tests that check that the infrastructure, cloud and provided storage functions well and supports virtualization, Not simply running as much tests as possible, nor testing negative cases for features."
 
 ---
 
@@ -347,7 +347,6 @@ No changes are needed in this repository. The work is entirely upstream.
 | **Scale limits** | 20 VMs x 4 disks, concurrent snapshot/restore, timing SLAs -- requires custom tests. |
 | **Cloning tests** | Clone operations (smart clone, host-assisted clone) are not in this proposal. |
 | **VM source types** | HTTP import, registry import are common provisioning methods not covered. |
-| **Backup test #68 is PENDING** | The existing backup-after-migration test never runs. Needs investigation. |
 
 ---
 
