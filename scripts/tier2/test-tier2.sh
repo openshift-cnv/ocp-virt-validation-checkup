@@ -219,7 +219,7 @@ if [ "${DRY_RUN}" == "true" ]; then
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
-    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
@@ -297,7 +297,7 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
 else
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
-    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
