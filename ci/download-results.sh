@@ -48,7 +48,7 @@ if [ ! -s "${SUMMARY_LOG}" ]; then
   exit 1
 fi
 
-# Copy JUnit files to ARTIFACT_DIR if the variable is set (for Prow CI)
+# Copy JUnit files and result archives to ARTIFACT_DIR if the variable is set (for Prow CI)
 if [ -n "${ARTIFACT_DIR:-}" ]; then
   echo "=== Copying JUnit files to ${ARTIFACT_DIR} ==="
 
@@ -71,6 +71,19 @@ if [ -n "${ARTIFACT_DIR:-}" ]; then
     echo "Total JUnit files copied: ${JUNIT_COUNT}"
   else
     echo "Warning: No JUnit files found in ${RESULTS_DIR}"
+  fi
+
+  echo "=== Copying result archives to ${ARTIFACT_DIR} ==="
+  TARBALL_COUNT=0
+  for tarball in "${RESULTS_DIR}"/test-results-*.tar.gz; do
+    if [ -f "${tarball}" ]; then
+      cp "${tarball}" "${ARTIFACT_DIR}/"
+      TARBALL_COUNT=$((TARBALL_COUNT + 1))
+      echo "  Copied: $(basename ${tarball})"
+    fi
+  done
+  if [ "${TARBALL_COUNT}" -eq 0 ]; then
+    echo "Warning: No test-results tar.gz files found in ${RESULTS_DIR}"
   fi
   echo ""
 fi

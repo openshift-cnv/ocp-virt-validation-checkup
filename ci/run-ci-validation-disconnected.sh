@@ -10,6 +10,7 @@ KUBEVIRT_RELEASE="${KUBEVIRT_RELEASE:-}"
 PULL_SECRET="${PULL_SECRET:-}"
 DRY_RUN="${DRY_RUN:-true}"
 OCP_VIRT_VALIDATION_TIMEOUT="${OCP_VIRT_VALIDATION_TIMEOUT:-10m}"
+ACCEPT_WINDOWS_EULA="${ACCEPT_WINDOWS_EULA:-false}"
 
 cleanup() {
   rm -f "${CLUSTER_PULL_SECRET:-}" 2>/dev/null || true
@@ -95,6 +96,7 @@ echo "=== Running disconnected validation checkup ==="
 OCP_VIRT_VALIDATION_IMAGE="${OCP_VIRT_VALIDATION_IMAGE:-}" \
 DRY_RUN="${DRY_RUN}" \
 OCP_VIRT_VALIDATION_TIMEOUT="${OCP_VIRT_VALIDATION_TIMEOUT}" \
+ACCEPT_WINDOWS_EULA="${ACCEPT_WINDOWS_EULA}" \
   "${SCRIPT_DIR}/run-ci-validation.sh"
 
 echo "=== Disconnected validation checkup completed successfully ==="
