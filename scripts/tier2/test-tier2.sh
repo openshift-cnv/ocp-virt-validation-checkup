@@ -235,9 +235,18 @@ if [ "${DRY_RUN}" == "true" ]; then
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait ${TEST_PID} || true
 
+  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
+  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
+  TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
+  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+    echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
+    echo "0" > "${ARTIFACTS}/.exit_code"
+  fi
+
   # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
   .venv/bin/python -c "
-import subprocess, sys, socket
+import re, subprocess, sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 from datetime import datetime, timezone
 
@@ -254,10 +263,18 @@ with open(log_path) as f:
 
 test_ids = [l.strip() for l in lines if '::' in l and not l.startswith(('=', '-', ' '))]
 
-# Count TEST_SKIPS entries that match real conformance tests (these were
-# deselected by -k and don't appear in the collected list above).
+# When 0 tests are collected (all deselected by -k/-m filters), count the
+# deselected tests as skipped to match ginkgo suite behavior.
+# In this case, skip TEST_SKIPS counting since those entries are already
+# included in the total deselected count.
 skipped_count = 0
-if skip_entries:
+if not test_ids:
+    log_text = ''.join(lines)
+    m = re.search(r'(\d+) deselected', log_text)
+    if m:
+        skipped_count = int(m.group(1))
+        print(f'All tests deselected by filter: {skipped_count} counted as skipped')
+elif skip_entries:
     result = subprocess.run(
         ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
         capture_output=True, text=True
@@ -267,7 +284,6 @@ if skip_entries:
     skipped_count = len(matched)
     if matched:
         print(f'TEST_SKIPS: {skipped_count} test(s) would be skipped: {matched}')
-
 total_tests = len(test_ids) + skipped_count
 
 testsuites = Element('testsuites', name='pytest tests')
@@ -291,7 +307,7 @@ for tid in test_ids:
 
 tree = ElementTree(testsuites)
 tree.write(junit_path, xml_declaration=True, encoding='unicode')
-print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collected, {skipped_count} skipped via TEST_SKIPS)')
+print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collected, {skipped_count} skipped)')
 " "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS:-}" "${TEST_FOCUS:-}"
 
 else
@@ -316,11 +332,55 @@ else
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait ${TEST_PID} || true
 
+  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
+  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
+  TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
+  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+    echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
+    echo "0" > "${ARTIFACTS}/.exit_code"
+
+    # Parse the deselected count from pytest output and generate a valid JUnit XML
+    # with deselected tests counted as skipped (matching ginkgo suite behavior).
+    .venv/bin/python -c "
+import re, sys, socket
+from xml.etree.ElementTree import Element, SubElement, ElementTree
+from datetime import datetime, timezone
+
+log_path = sys.argv[1]
+junit_path = sys.argv[2]
+
+deselected = 0
+with open(log_path) as f:
+    log_text = f.read()
+m = re.search(r'(\d+) deselected', log_text)
+if m:
+    deselected = int(m.group(1))
+
+testsuites = Element('testsuites', name='pytest tests')
+SubElement(testsuites, 'testsuite',
+    name='pytest',
+    errors='0',
+    failures='0',
+    skipped=str(deselected),
+    tests=str(deselected),
+    time='0.000',
+    timestamp=datetime.now(timezone.utc).isoformat(),
+    hostname=socket.gethostname(),
+)
+tree = ElementTree(testsuites)
+tree.write(junit_path, xml_declaration=True, encoding='unicode')
+print(f'Generated JUnit XML: 0 tests run, {deselected} deselected (counted as skipped)')
+" "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml"
+  fi
+
   # Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
   # since pytest -k deselection omits them from the report entirely.
   # Only count entries that match real conformance test names.
   # Exclude any entries that also appear in TEST_FOCUS (those were not skipped).
-  if [ -n "${TEST_SKIPS}" ]; then
+  # Skip when exit code was 5: either the deselected count already includes these
+  # (K_EXPR was set), or it's a genuine collection failure (K_EXPR was empty).
+  if [ -n "${TEST_SKIPS}" ] && [ "${TIER2_EXIT}" != "5" ]; then
     .venv/bin/python -c "
 import subprocess, sys, xml.etree.ElementTree as ET
 
