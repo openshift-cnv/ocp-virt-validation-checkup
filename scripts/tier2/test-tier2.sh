@@ -20,13 +20,48 @@ function cleanup_and_exit() {
     if [ -n "${TEST_PID}" ] && kill -0 "${TEST_PID}" 2>/dev/null; then
         echo "Sending SIGTERM to tier2 test process (PID: ${TEST_PID})..."
         kill -TERM "${TEST_PID}" 2>/dev/null || true
-        echo "Waiting for tier2 test process to terminate..."
+        local i
+        for i in $(seq 1 10); do
+            kill -0 "${TEST_PID}" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "${TEST_PID}" 2>/dev/null; then
+            echo "Process did not exit after SIGTERM — sending SIGKILL."
+            kill -KILL "${TEST_PID}" 2>/dev/null || true
+        fi
         wait "${TEST_PID}" 2>/dev/null || true
         echo "Tier2 test process terminated."
     fi
     
     cleanup_test_namespaces
     exit 1
+}
+
+function wait_for_pytest_pipeline() {
+    local pid=$1
+    local exit_code_file=$2
+
+    while kill -0 "${pid}" 2>/dev/null; do
+        if [ -f "${exit_code_file}" ]; then
+            sleep 5
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "pytest finished but pipeline still running (likely orphaned child process holding pipe open) — sending SIGTERM."
+                kill "${pid}" 2>/dev/null || true
+                local i
+                for i in $(seq 1 10); do
+                    kill -0 "${pid}" 2>/dev/null || break
+                    sleep 1
+                done
+                if kill -0 "${pid}" 2>/dev/null; then
+                    echo "Pipeline did not exit after SIGTERM — sending SIGKILL."
+                    kill -KILL "${pid}" 2>/dev/null || true
+                fi
+            fi
+            break
+        fi
+        sleep 5
+    done
+    wait "${pid}" 2>/dev/null || true
 }
 
 # Set up signal traps for cleanup EARLY
@@ -217,6 +252,7 @@ echo "Using markers: ${MARKERS}"
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
+  rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn10Warning" \
@@ -233,7 +269,7 @@ if [ "${DRY_RUN}" == "true" ]; then
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
-  wait ${TEST_PID} || true
+  wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
   # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
   .venv/bin/python -c "
@@ -295,6 +331,7 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
 " "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS:-}" "${TEST_FOCUS:-}"
 
 else
+  rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn10Warning" \
@@ -314,7 +351,7 @@ else
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
-  wait ${TEST_PID} || true
+  wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
   # Add manually deselected tests (via TEST_SKIPS) to the JUnit XML skipped count,
   # since pytest -k deselection omits them from the report entirely.
