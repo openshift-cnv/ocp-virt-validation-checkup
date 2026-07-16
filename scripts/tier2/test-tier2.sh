@@ -240,7 +240,7 @@ if [ "${DRY_RUN}" == "true" ]; then
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "conformance" \
-    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
@@ -318,7 +318,7 @@ else
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "conformance" \
-    -W "ignore::pytest.PytestRemovedIn9Warning" \
+    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
