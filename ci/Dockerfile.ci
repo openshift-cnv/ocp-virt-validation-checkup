@@ -1,6 +1,8 @@
 ################################################################################
 # Build Stage 1: KubeVirt Test Binary
 ################################################################################
+ARG VIRT_CLUSTER_VALIDATE_IMAGE=quay.io/oshoval/virt-cluster-validate:latest
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6 AS kubevirt-builder
 
 ARG KUBEVIRT_VERSION=v1.5.0
@@ -61,6 +63,12 @@ RUN chown -R ${USER_UID}:0 ${TEST_DIR} && \
 
 
 ################################################################################
+# Build Stage 5: virt-cluster-validate payload
+################################################################################
+FROM ${VIRT_CLUSTER_VALIDATE_IMAGE} AS virt-cluster-validate-builder
+
+
+################################################################################
 # Final Stage: Runtime Image
 ################################################################################
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
@@ -72,7 +80,8 @@ ARG HOME=/home/${USER_NAME}
 
 ENV USER_UID=${USER_UID} \
     USER_NAME=${USER_NAME} \
-    HOME=${HOME}
+    HOME=${HOME} \
+    PATH=${HOME}/virt-cluster-validate/bin:${PATH}
 
 # Install system dependencies and OpenShift CLI tools
 RUN microdnf install -y jq make tar gzip python3 git which sshpass findutils grep sed \
@@ -99,21 +108,18 @@ COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/p
 COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /opt/python/ /opt/python/
 COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /openshift-virtualization-tests /openshift-virtualization-tests
 
+# Copy virt-cluster-validate payload used by the optional suite
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/virt-cluster-validate ${HOME}/virt-cluster-validate/virt-cluster-validate
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/bin ${HOME}/virt-cluster-validate/bin
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/checks.d ${HOME}/virt-cluster-validate/checks.d
+
 # Create convenience symlinks for common commands
 RUN ln -s ${HOME}/manifests/run/generate.sh /usr/local/bin/generate && \
     ln -s ${HOME}/manifests/fetch/get_results.sh /usr/local/bin/get_results
 
-# Create entrypoint wrapper to prevent running real tests with CI build
+# Create entrypoint wrapper
 RUN printf '#!/bin/bash\n\
 set -e\n\
-\n\
-# Prevent running real tests with CI build image\n\
-if [ "${DRY_RUN:-true}" != "true" ]; then\n\
-  echo "Error: Cannot run tests with DRY_RUN=false using a CI build image"\n\
-  echo "CI build images may contain outdated test versions and should only be used for dry-run validation"\n\
-  echo "Please set DRY_RUN=true or use a production image"\n\
-  exit 1\n\
-fi\n\
 \n\
 # Execute the actual entrypoint\n\
 exec %s/scripts/entrypoint.sh\n\

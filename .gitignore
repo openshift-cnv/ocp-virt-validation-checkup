@@ -10,3 +10,5 @@ Pipfile.lock
 .env.production.local
 .dockerconfigjson
 CLAUDE.md
+__pycache__/
+*.pyc
