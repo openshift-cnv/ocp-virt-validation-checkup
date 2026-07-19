@@ -61,6 +61,19 @@ RUN chown -R ${USER_UID}:0 ${TEST_DIR} && \
 
 
 ################################################################################
+# Build Stage 5: virt-cluster-validate payload
+################################################################################
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6 AS virt-cluster-validate-builder
+
+WORKDIR /opt/app-root/src
+RUN microdnf install -y git findutils && \
+    microdnf clean all
+RUN git clone --depth 1 https://github.com/openshift-cnv/virt-cluster-validate.git . && \
+    chmod +x virt-cluster-validate && \
+    find bin checks.d -type f -exec chmod +x {} +
+
+
+################################################################################
 # Final Stage: Runtime Image
 ################################################################################
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
@@ -79,6 +92,8 @@ RUN microdnf install -y jq make tar gzip python3 git which sshpass findutils gre
         libxslt libxml2 libatomic && \
     microdnf clean all && \
     curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl && \
+    chgrp 0 /usr/local/bin && \
+    chmod g+rwx /usr/local/bin && \
     mkdir -p ${HOME} && \
     chown ${USER_UID}:0 ${HOME} && \
     chmod ug+rwx ${HOME}
@@ -99,11 +114,17 @@ COPY --from=utilities-builder --chown=${USER_UID}:0 --chmod=775 /workspace/bin/p
 COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /opt/python/ /opt/python/
 COPY --from=cnv-tests-builder --chown=${USER_UID}:0 --chmod=775 /openshift-virtualization-tests /openshift-virtualization-tests
 
+# Copy virt-cluster-validate payload in upstream must-gather layout
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/virt-cluster-validate /opt/app-root/src/virt-cluster-validate
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/bin /opt/app-root/src/bin
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/checks.d /opt/app-root/src/checks.d
+COPY --from=virt-cluster-validate-builder --chown=${USER_UID}:0 --chmod=775 /opt/app-root/src/collection-scripts/gather /usr/bin/gather
+
 # Create convenience symlinks for common commands
 RUN ln -s ${HOME}/manifests/run/generate.sh /usr/local/bin/generate && \
     ln -s ${HOME}/manifests/fetch/get_results.sh /usr/local/bin/get_results
 
-# Create entrypoint wrapper to prevent running real tests with CI build
+# Create entrypoint wrapper
 RUN printf '#!/bin/bash\n\
 set -e\n\
 \n\

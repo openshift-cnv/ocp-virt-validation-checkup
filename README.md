@@ -136,6 +136,7 @@ It is possible to configure a subset of the suites to run. The available test su
 * `storage` - conformance tests with `sig-storage` label + tests with `StorageCritical` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
 * `ssp` - tests from [ssp-operator](https://github.com/kubevirt/ssp-operator/tree/main/tests) repository.
 * `tier2` - Conformance tests from [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository.
+* `virt-cluster-validate` - opt-in validator checks bundled from the `virt-cluster-validate` payload.
 
 Use the `TEST_SUITES` environment variable, with a comma separated list of the desired suites, when running the `generate` script. The example below shows how to run only the `compute` and the `network` suites, by setting `TEST_SUITES` to `"compute,network"`:
 ```bash

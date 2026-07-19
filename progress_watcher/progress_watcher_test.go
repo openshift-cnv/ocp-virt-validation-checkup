@@ -151,7 +151,7 @@ func TestDiscoverTestSuites(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create some test suite directories and log files
-	suitesDirs := []string{"compute", "network", "ssp"}
+	suitesDirs := []string{"compute", "network", "ssp", "virt-cluster-validate"}
 	for _, suite := range suitesDirs {
 		suiteDir := filepath.Join(tmpDir, suite)
 		if err := os.MkdirAll(suiteDir, 0755); err != nil {
