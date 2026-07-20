@@ -350,22 +350,26 @@ The script will:
 
 Windows testing requires additional setup in disconnected environments because the `windows-efi-installer` Tekton pipeline normally uses the hub resolver to fetch the pipeline and tasks from Artifact Hub, which requires internet access.
 
+**Recommended:** Apply `manifests/windows/golden-image.yaml` once. Pre-install the Tekton pipeline (see Step 2 below), set `winImageDownloadURL` to your internal ISO mirror in the manifest, and wait for the pipeline to finish. Then run the checkup **without** `ACCEPT_WINDOWS_EULA` — the tool detects the existing DataSource and skips the pipeline entirely, avoiding repeated downloads and rebuilds.
+
+The steps below describe the **alternative (ephemeral)** path using `ACCEPT_WINDOWS_EULA=true`, which rebuilds the golden image on every run.
+
 ### Prerequisites for Disconnected Windows Testing
 
 1. **OpenShift Pipelines operator** installed on the cluster
-2. **Windows 11 ISO** available on an accessible internal server
+2. **Windows Server 2022 ISO** available on an accessible internal server
 3. **Tekton pipeline and tasks** pre-installed manually
 
-### Step 1: Download the Windows ISO
+### Step 1: Download the Windows Server 2022 ISO
 
-Download the Windows 11 ISO from Microsoft on a connected machine and host it on an internal HTTP server accessible from the cluster:
+Download the Windows Server 2022 evaluation ISO from Microsoft on a connected machine and host it on an internal HTTP server accessible from the cluster:
 
 ```bash
 # On connected machine
-curl -L -o windows11.iso "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso"
+curl -L -o SERVER_EVAL_x64FRE_en-us.iso "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
 
 # Copy to your internal HTTP server
-scp windows11.iso user@internal-server:/var/www/html/images/
+scp SERVER_EVAL_x64FRE_en-us.iso user@internal-server:/var/www/html/images/
 ```
 
 ### Step 2: Pre-install the Tekton Pipeline
@@ -387,10 +391,12 @@ curl -L -o windows-efi-installer-configmaps.yaml \
 
 Transfer and apply to the disconnected cluster:
 ```bash
-# Apply to the golden image namespace
-oc apply -f windows-efi-installer-tasks.yaml -n openshift-virtualization-os-images
-oc apply -f windows-efi-installer-configmaps.yaml -n openshift-virtualization-os-images
-oc apply -f windows-efi-installer.yaml -n openshift-virtualization-os-images
+oc create namespace validation-os-images
+oc label namespace validation-os-images app=ocp-virt-validation
+oc label namespace validation-os-images pod-security.kubernetes.io/enforce=privileged
+oc apply -f windows-efi-installer-tasks.yaml -n validation-os-images
+oc apply -f windows-efi-installer-configmaps.yaml -n validation-os-images
+oc apply -f windows-efi-installer.yaml -n validation-os-images
 ```
 
 Alternatively, get the manifests from Artifact Hub:
@@ -403,13 +409,14 @@ When running the validation checkup, specify your internal Windows ISO URL:
 ```bash
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
     -e ACCEPT_WINDOWS_EULA=true \
-    -e WIN_IMAGE_DOWNLOAD_URL="http://internal-server.example.com/images/windows11.iso" \
+    -e STORAGE_CLASS=<your-storage-class> \
+    -e WIN_IMAGE_DOWNLOAD_URL="http://internal-server.example.com/images/SERVER_EVAL_x64FRE_en-us.iso" \
     ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 
 ### Notes for Disconnected Windows Testing
 
-- The Windows golden image will be created in the `openshift-virtualization-os-images` namespace
-- The image creation takes approximately 60-90 minutes on first run
-- Once created, the golden image is reused for subsequent test runs
+- The pipeline output PVC backs a `win2k22` DataSource in a custom `validation-os-images` namespace created by the tool -- no intermediate VMs or snapshots
+- The image creation takes approximately 1-2 hours on first run (up to 3 hours on slow networks)
+- With `ACCEPT_WINDOWS_EULA=true`, each run rebuilds the golden image from scratch and cleans up on completion
 - If the hub resolver fails (due to no internet), the checkup will provide instructions for manual pipeline installation
