@@ -326,3 +326,38 @@ get_virtctl() {
   rm virtctl.tar.gz
   echo "virtctl downloaded"
 }
+
+# Cleanup golden image resources (namespace, SCC policy, ClusterRoleBinding).
+# When the namespace is tool-managed (labeled app=ocp-virt-validation), deletes
+# the entire namespace. Otherwise, optionally cleans up individual labeled resources.
+#
+# Arguments:
+#   $1 - namespace to clean up
+#   $2 - if "selective", clean up individual labeled resources when namespace
+#        is not tool-managed (default: skip cleanup for non-tool-managed namespaces)
+cleanup_golden_image_resources() {
+  local ns="$1"
+  local mode="${2:-}"
+
+  local ns_label
+  ns_label="$(oc get namespace "${ns}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || true)"
+
+  if [ "${ns_label}" == "ocp-virt-validation" ]; then
+    echo "Cleaning up tool-managed namespace ${ns}..."
+    oc delete namespace "${ns}" --wait=false 2>/dev/null || true
+  elif [ "${mode}" == "selective" ]; then
+    echo "Namespace ${ns} is not tool-managed, cleaning up individual labeled resources only"
+    oc delete datasource -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete pvc -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete pipelinerun -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete configmap -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete rolebinding -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete role -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete sa -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+  else
+    return 0
+  fi
+
+  oc adm policy remove-scc-from-user privileged -z pipeline -n "${ns}" 2>/dev/null || true
+  oc delete clusterrolebinding -l app=ocp-virt-validation 2>/dev/null || true
+}
