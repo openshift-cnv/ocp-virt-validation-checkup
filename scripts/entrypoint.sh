@@ -5,8 +5,34 @@ set -e
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/funcs.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
+TEST_VIRT_CLUSTER_VALIDATE_SCRIPT="${SCRIPT_DIR}/virt-cluster-validate/test-virt-cluster-validate.sh"
 
 create_kubeconfig
+
+get_console_proxy_results_url() {
+  local console_host
+  local namespace="${POD_NAMESPACE:-ocp-virt-validation}"
+  local service_name="pvc-reader-${TIMESTAMP}"
+
+  console_host=$(oc get route console -n openshift-console -o jsonpath='{.spec.host}' 2>/dev/null || true)
+  if [[ -z "${console_host}" ]]; then
+    return 1
+  fi
+
+  echo "https://${console_host}/api/kubernetes/api/v1/namespaces/${namespace}/services/http:${service_name}:8080/proxy"
+}
+
+wait_for_results_pod_ready() {
+  local namespace="${POD_NAMESPACE:-ocp-virt-validation}"
+
+  if oc wait --for=condition=ready pod -n "${namespace}" -l "app=pvc-reader,timestamp=${TIMESTAMP}" --timeout='2m' >/dev/null 2>&1; then
+    echo "Results reader pod is ready."
+    return 0
+  fi
+
+  echo "Warning: results reader pod did not become ready within 2 minutes."
+  return 1
+}
 
 # Add owner reference to PVC so it gets cleaned up when the job is deleted
 add_pvc_owner_reference() {
@@ -87,17 +113,12 @@ if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
   
   if [ $? -eq 0 ]; then
     echo "Results resources created successfully."
-    
-    # Wait a moment for the route to be fully created
-    sleep 2
-    
-    # Extract the route URL
-    ROUTE_HOST=$(oc get route pvcreader-${TIMESTAMP} -n ${POD_NAMESPACE} -o jsonpath='{.status.ingress[0].host}' 2>/dev/null)
-    
-    if [ -n "${ROUTE_HOST}" ]; then
-      DETAILED_RESULT_URL="https://${ROUTE_HOST}"
-      echo "Route URL: ${DETAILED_RESULT_URL}"
-      
+    wait_for_results_pod_ready || true
+
+    DETAILED_RESULT_URL=$(get_console_proxy_results_url || true)
+    if [ -n "${DETAILED_RESULT_URL}" ]; then
+      echo "Console proxy URL: ${DETAILED_RESULT_URL}"
+
       # Update the ConfigMap with detailed_results_url and detailed_results_file
       CONFIGMAP_NAME="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
       if oc get configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} &>/dev/null; then
@@ -119,9 +140,9 @@ if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
       
       echo "To view the results, visit: ${DETAILED_RESULT_URL}"
     else
-      echo "Warning: Could not extract route URL"
+      echo "Warning: Could not determine console proxy results URL"
       echo "To view the results, run:"
-      echo "  oc get route pvcreader-${TIMESTAMP} -n ${POD_NAMESPACE} -o jsonpath='{.status.ingress[0].host}'"
+      echo "  oc get route console -n openshift-console -o jsonpath='{.spec.host}'"
     fi
     
     exit 0
@@ -209,7 +230,7 @@ cleanup_and_forward_signal() {
 # Set trap to cleanup and forward signals
 trap cleanup_and_forward_signal INT TERM
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
+ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2|virt-cluster-validate"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
   echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
@@ -480,6 +501,20 @@ if suite_enabled "tier2"; then
   echo "Tier-2 test suite has finished."
 else
   echo "Tier-2 test suite has been skipped."
+fi
+
+# =====================
+# virt-cluster-validate
+# =====================
+if suite_enabled "virt-cluster-validate"; then
+  echo "Running virt-cluster-validate suite..."
+  ${TEST_VIRT_CLUSTER_VALIDATE_SCRIPT} &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
+  echo "virt-cluster-validate suite has finished."
+else
+  echo "virt-cluster-validate suite has been skipped."
 fi
 
 

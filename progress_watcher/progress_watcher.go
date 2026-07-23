@@ -344,11 +344,12 @@ func discoverTestSuites(resultsDir string) []*TestSuite {
 
 	// Known test suite patterns
 	suitePatterns := map[string]string{
-		"compute": filepath.Join(resultsDir, "compute", "compute-log.txt"),
-		"network": filepath.Join(resultsDir, "network", "network-log.txt"),
-		"storage": filepath.Join(resultsDir, "storage", "storage-log.txt"),
-		"ssp":     filepath.Join(resultsDir, "ssp", "ssp-log.txt"),
-		"tier2":   filepath.Join(resultsDir, "tier2", "tier2-log.txt"),
+		"compute":               filepath.Join(resultsDir, "compute", "compute-log.txt"),
+		"network":               filepath.Join(resultsDir, "network", "network-log.txt"),
+		"storage":               filepath.Join(resultsDir, "storage", "storage-log.txt"),
+		"ssp":                   filepath.Join(resultsDir, "ssp", "ssp-log.txt"),
+		"tier2":                 filepath.Join(resultsDir, "tier2", "tier2-log.txt"),
+		"virt-cluster-validate": filepath.Join(resultsDir, "virt-cluster-validate", "virt-cluster-validate-log.txt"),
 	}
 
 	for suiteName, logPath := range suitePatterns {
@@ -578,6 +579,9 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	case "tier2":
 		tier2Script := filepath.Join(scriptDir, "tier2", "test-tier2.sh")
 		cmd = exec.Command("/bin/bash", tier2Script)
+	case "virt-cluster-validate":
+		validateScript := filepath.Join(scriptDir, "virt-cluster-validate", "test-virt-cluster-validate.sh")
+		cmd = exec.Command("/bin/bash", validateScript)
 	default:
 		logger.Printf("Unknown test suite: %s\n", suiteName)
 		return 0
