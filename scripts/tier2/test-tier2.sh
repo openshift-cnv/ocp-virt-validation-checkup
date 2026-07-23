@@ -2,6 +2,9 @@
 
 set -e
 
+readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source "${SCRIPT_DIR}/../funcs.sh"
+
 function cleanup_test_namespaces() {
     echo "Cleaning up tier2 test namespaces..."
     for ns in cnv-tests-run-in-progress-ns cnv-tests-utilities; do
@@ -233,21 +236,49 @@ if [ -n "${K_EXPR}" ]; then
 fi
 
 # Build pytest marker expression
-# Note: Windows tests require @pytest.mark.windows marker in openshift-virtualization-tests
-# When Windows tests are added with this marker, they will be automatically included
-# when ACCEPT_WINDOWS_EULA=true
+# Runs tests matching @pytest.mark.conformance; when no golden image is available,
+# tests with @pytest.mark.windows are excluded.
+# A golden image is available when either:
+# - ACCEPT_WINDOWS_EULA=true (tool creates golden image), or
+# - A user-provided (BYOI) DataSource exists and is Ready
 MARKERS="conformance"
 WIN_IMAGE_FLAG=""
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
-  echo "Windows EULA accepted - Windows tests will be included when available"
-  MARKERS="${MARKERS} or windows"
-  # WIN_USERNAME/WIN_PASSWORD: defaults match setup-golden-image.sh output (Administrator/Heslo123),
-  # but can be overridden for custom golden images with different credentials
-  WIN_IMAGE_FLAG="--tc=win_golden_image_name:${WIN_IMAGE_NAME:-windows2022-golden-image} --tc=os_login_param.win.username:${WIN_USERNAME:-Administrator} --tc=os_login_param.win.password:${WIN_PASSWORD:-Heslo123} --tc=storage_class_a:${STORAGE_CLASS} --tc=storage_class_b:${STORAGE_CLASS}"
+GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
+GOLDEN_IMAGE_NAME="${GOLDEN_IMAGE_NAME:-win2k22}"
+DS_READY="$(oc get datasource "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+DS_LABEL="$(oc get datasource "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+  -o jsonpath='{.metadata.labels.app}' 2>/dev/null || true)"
+if [ "${DS_LABEL}" == "ocp-virt-validation" ] && [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
+  echo "WARNING: Found stale tool-managed DataSource from a previous run. Cleaning up..."
+  cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
+  DS_READY=""
+fi
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
+   { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
+  echo "Windows golden image available - Windows tests will be included"
+  WIN_LOGIN_CONFIG="${ARTIFACTS}/win_login_config.py"
+  cat > "${WIN_LOGIN_CONFIG}" <<PYEOF
+os_login_param = {
+    "win-container-disk": {
+        "username": "Administrator",
+        "password": "Administrator",
+    },
+}
+
+config = globals().get("config") or {}
+config["os_login_param"] = os_login_param
+PYEOF
+  WIN_IMAGE_FLAG="--tc-file=${WIN_LOGIN_CONFIG} --tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
+else
+  MARKERS="conformance and not windows"
 fi
 
 echo "Starting tier2 tests 🧪"
 echo "Using markers: ${MARKERS}"
+
+# TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
+# removes the unconditional artifactory dependency from session-scoped fixtures.
 
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
@@ -255,11 +286,12 @@ if [ "${DRY_RUN}" == "true" ]; then
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
-    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
     --conformance-storage-class=${STORAGE_CLASS} \
+    --tc=storage_class_a:${STORAGE_CLASS} \
+    --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
     ${WIN_IMAGE_FLAG} \
@@ -281,6 +313,9 @@ if [ "${DRY_RUN}" == "true" ]; then
   fi
 
   # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
+  # Overwrite .exit_code after successful JUnit generation so junit_parser
+  # does not flag the suite as a setup failure when pytest --collect-only
+  # exits non-zero (e.g. import warnings in CI or no tests collected).
   .venv/bin/python -c "
 import re, subprocess, sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
@@ -312,7 +347,7 @@ if not test_ids:
         print(f'All tests deselected by filter: {skipped_count} counted as skipped')
 elif skip_entries:
     result = subprocess.run(
-        ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
         capture_output=True, text=True
     )
     all_collected = result.stdout
@@ -346,15 +381,20 @@ tree.write(junit_path, xml_declaration=True, encoding='unicode')
 print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collected, {skipped_count} skipped)')
 " "${ARTIFACTS}/tier2-log.txt" "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS:-}" "${TEST_FOCUS:-}"
 
+  if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+    echo 0 > "${ARTIFACTS}/.exit_code"
+  fi
+
 else
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
-    -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
     --conformance-storage-class=${STORAGE_CLASS} \
+    --tc=storage_class_a:${STORAGE_CLASS} \
+    --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
     ${WIN_IMAGE_FLAG} \
@@ -430,7 +470,7 @@ skip_entries = [e for e in skip_entries if e not in focus_entries]
 
 # Collect all conformance test node IDs (without running them)
 result = subprocess.run(
-    ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
     capture_output=True, text=True
 )
 collected = result.stdout
