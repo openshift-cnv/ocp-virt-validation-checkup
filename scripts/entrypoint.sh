@@ -9,27 +9,6 @@ TEST_VIRT_CLUSTER_VALIDATE_SCRIPT="${SCRIPT_DIR}/virt-cluster-validate/test-virt
 
 create_kubeconfig
 
-wait_for_route_host() {
-  local route_name=$1
-  local namespace="${POD_NAMESPACE:-ocp-virt-validation}"
-  local attempts=${2:-30}
-  local host=""
-  local attempt
-
-  for (( attempt=1; attempt<=attempts; attempt++ )); do
-    host=$(oc get route "${route_name}" -n "${namespace}" -o jsonpath='{.status.ingress[0].host}' 2>/dev/null || true)
-    if [[ -n "${host}" ]]; then
-      echo "${host}"
-      return 0
-    fi
-
-    sleep 2
-  done
-
-  echo "Detailed results route ${route_name} did not receive an ingress host." >&2
-  return 1
-}
-
 get_console_proxy_results_url() {
   local console_host
   local namespace="${POD_NAMESPACE:-ocp-virt-validation}"
@@ -137,15 +116,9 @@ if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
     wait_for_results_pod_ready || true
 
     DETAILED_RESULT_URL=$(get_console_proxy_results_url || true)
-    if [ -z "${DETAILED_RESULT_URL}" ]; then
-      ROUTE_HOST=$(wait_for_route_host "pvcreader-${TIMESTAMP}")
-      DETAILED_RESULT_URL="https://${ROUTE_HOST}"
-      echo "Route URL: ${DETAILED_RESULT_URL}"
-    else
-      echo "Console proxy URL: ${DETAILED_RESULT_URL}"
-    fi
-
     if [ -n "${DETAILED_RESULT_URL}" ]; then
+      echo "Console proxy URL: ${DETAILED_RESULT_URL}"
+
       # Update the ConfigMap with detailed_results_url and detailed_results_file
       CONFIGMAP_NAME="${CONFIGMAP_NAME:-ocp-virt-validation-${TIMESTAMP}}"
       if oc get configmap "${CONFIGMAP_NAME}" -n ${POD_NAMESPACE} &>/dev/null; then
@@ -167,9 +140,9 @@ if [ "${CREATE_RESULTS_RESOURCES}" == "true" ]; then
       
       echo "To view the results, visit: ${DETAILED_RESULT_URL}"
     else
-      echo "Warning: Could not determine results URL"
+      echo "Warning: Could not determine console proxy results URL"
       echo "To view the results, run:"
-      echo "  oc get route pvcreader-${TIMESTAMP} -n ${POD_NAMESPACE} -o jsonpath='{.status.ingress[0].host}'"
+      echo "  oc get route console -n openshift-console -o jsonpath='{.spec.host}'"
     fi
     
     exit 0

@@ -158,13 +158,6 @@ spec:
 
 **Note:** the value passed to `TEST_SUITES` should be comma-separated.
 
-To opt in to the bundled `virt-cluster-validate` component, add it explicitly to `TEST_SUITES`:
-```bash
-$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
-    -e TEST_SUITES=compute,network,virt-cluster-validate \
-    ${OCP_VIRT_VALIDATION_IMAGE} generate
-```
-
 #### virt-cluster-validate
 The `virt-cluster-validate` suite is disabled by default and runs bundled validator checks inside the same checkup image. Its results are exported through the same results PVC and summary flow as the other suites, under the `virt-cluster-validate` section.
 

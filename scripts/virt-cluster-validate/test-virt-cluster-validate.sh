@@ -7,12 +7,9 @@ readonly SUITE_NAME="virt-cluster-validate"
 readonly ARTIFACTS="${RESULTS_DIR}/${SUITE_NAME}"
 readonly LOG_FILE="${ARTIFACTS}/${SUITE_NAME}-log.txt"
 readonly JUNIT_FILE="${ARTIFACTS}/junit.results.xml"
-readonly RESULTS_JSON="${ARTIFACTS}/results.json"
 readonly STDERR_FILE="${ARTIFACTS}/validator-stderr.txt"
 readonly EXIT_CODE_FILE="${ARTIFACTS}/.exit_code"
-readonly RAW_RESULTS_DIR="${ARTIFACTS}/raw"
-readonly SUMMARY_BUILDER="${SCRIPT_DIR}/build_summary.py"
-readonly CONVERTER="${SCRIPT_DIR}/json_to_junit.py"
+readonly DRY_RUN="${DRY_RUN:-false}"
 readonly RUNTIME_HOME="${HOME:-/home/ocp-virt-validation-checkup}"
 readonly VALIDATOR_HOME_DEFAULT="${RUNTIME_HOME}/virt-cluster-validate"
 
@@ -20,7 +17,7 @@ VALIDATOR_HOME="${VALIDATOR_HOME:-${VALIDATOR_HOME_DEFAULT}}"
 VALIDATOR_BIN="${VALIDATOR_BIN:-${VALIDATOR_HOME}/virt-cluster-validate}"
 export PATH="${VALIDATOR_HOME}/bin:${RUNTIME_HOME}:${PATH}"
 
-mkdir -p "${ARTIFACTS}" "${RAW_RESULTS_DIR}"
+mkdir -p "${ARTIFACTS}"
 
 collect_checks() {
     local checks=()
@@ -36,114 +33,177 @@ collect_checks() {
     )
 }
 
+xml_escape() {
+    sed \
+        -e 's/&/\&amp;/g' \
+        -e 's/</\&lt;/g' \
+        -e 's/>/\&gt;/g' \
+        -e "s/'/\&apos;/g" \
+        -e 's/"/\&quot;/g'
+}
+
+first_nonempty_line() {
+    local file=$1
+
+    while IFS= read -r line; do
+        if [[ -n "${line//[[:space:]]/}" ]]; then
+            printf '%s\n' "${line}"
+            return 0
+        fi
+    done < "${file}"
+
+    return 1
+}
+
+tokenize_junit() {
+    sed 's/></>\
+</g' "${JUNIT_FILE}"
+}
+
 emit_failure_artifacts() {
     local message=$1
 
     printf '%s\n' "${message}" > "${STDERR_FILE}"
     (
         echo "Starting ${SUITE_NAME} checks"
-        if ! python3 "${CONVERTER}" \
-            --suite-name "${SUITE_NAME}" \
-            --junit-output "${JUNIT_FILE}" \
-            --stderr-file "${STDERR_FILE}" \
-            --emit-run-log; then
-            :
-        fi
+        write_failure_junit "${message}"
+        echo "collecting ... collected 1 items"
+        echo "TEST: ${SUITE_NAME} STATUS: FAILED"
+        echo "0 passed, 1 failed in 0 seconds"
         echo "1" > "${EXIT_CODE_FILE}"
         exit 0
     ) 2>&1 | tee "${LOG_FILE}"
 }
 
-write_fallback_result() {
-    local output_file=$1
-    local testpath=$2
-    local exit_code=$3
-    local duration=$4
-    local stderr_file=$5
+write_dry_run_junit() {
+    local check
+    local escaped_check
 
-    python3 - "${output_file}" "${testpath}" "${exit_code}" "${duration}" "${stderr_file}" <<'PY'
-import json
-import pathlib
-import sys
-
-output_file = pathlib.Path(sys.argv[1])
-testpath = sys.argv[2]
-exit_code = int(sys.argv[3])
-duration = int(sys.argv[4])
-stderr_path = pathlib.Path(sys.argv[5])
-
-stderr_text = stderr_path.read_text() if stderr_path.exists() else ""
-stderr_lines = [line for line in stderr_text.splitlines() if line]
-message = f"validator wrapper did not receive valid JSON output (exit code {exit_code})"
-if stderr_lines:
-    message = stderr_lines[0]
-
-payload = {
-    "summary": "Passed: 0, Failed: 1, Total: 1",
-    "results": [
-        {
-            "testpath": testpath,
-            "success": False,
-            "has_warnings": False,
-            "cancelled": False,
-            "duration": duration,
-            "report_messages": [f"FAIL: {message}"],
-            "log": stderr_lines,
-            "errors": stderr_lines or [message],
-            "warnings": [],
-        }
-    ],
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+        printf '<testsuites name="%s"><testsuite name="%s" tests="%d" failures="0" errors="0" skipped="%d" time="0.000">' \
+            "${SUITE_NAME}" "${SUITE_NAME}" "${#CHECKS[@]}" "${#CHECKS[@]}"
+        for check in "${CHECKS[@]}"; do
+            escaped_check=$(printf '%s' "${check}" | xml_escape)
+            printf '<testcase classname="%s" name="%s" time="0.000"><skipped /></testcase>' \
+                "${SUITE_NAME}" "${escaped_check}"
+        done
+        printf '%s\n' '</testsuite></testsuites>'
+    } > "${JUNIT_FILE}"
 }
 
-output_file.write_text(json.dumps(payload, indent=2) + "\n")
-PY
+write_failure_junit() {
+    local message=$1
+    local escaped_message
+    local escaped_stderr=""
+
+    escaped_message=$(printf '%s' "${message}" | xml_escape)
+    if [[ -f "${STDERR_FILE}" ]]; then
+        escaped_stderr=$(xml_escape < "${STDERR_FILE}")
+    fi
+
+    {
+        printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+        printf '<testsuites name="%s"><testsuite name="%s" tests="1" failures="1" errors="0" skipped="0" time="0.000">' \
+            "${SUITE_NAME}" "${SUITE_NAME}"
+        printf '<testcase classname="%s" name="%s" time="0.000">' "${SUITE_NAME}" "${SUITE_NAME}"
+        printf '<failure message="%s">' "${escaped_message}"
+        if [[ -n "${escaped_stderr}" ]]; then
+            printf '%s' "${escaped_stderr}"
+        else
+            printf '%s' "${escaped_message}"
+        fi
+        printf '%s' '</failure>'
+        if [[ -n "${escaped_stderr}" ]]; then
+            printf '<system-out>%s</system-out>' "${escaped_stderr}"
+        fi
+        printf '%s\n' '</testcase></testsuite></testsuites>'
+    } > "${JUNIT_FILE}"
 }
 
-is_valid_single_result_json() {
-    local json_file=$1
+emit_junit_progress() {
+    local testcase_count
+    local pass_count=0
+    local fail_count=0
+    local duration
+    local name
+    local status
 
-    python3 - "${json_file}" <<'PY' > /dev/null
-import json
-import pathlib
-import sys
+    testcase_count=$(tokenize_junit | grep -c '^<testcase ' || true)
+    echo "collecting ... collected ${testcase_count} items"
 
-path = pathlib.Path(sys.argv[1])
-data = json.loads(path.read_text())
-results = data.get("results")
-if not isinstance(results, list) or len(results) != 1:
-    raise SystemExit(1)
-result = results[0]
-if "testpath" not in result or "success" not in result:
-    raise SystemExit(1)
-PY
+    while IFS=$'\t' read -r name status; do
+        [[ -n "${name}" ]] || continue
+        echo "TEST: ${name} STATUS: ${status}"
+        case "${status}" in
+            PASSED) pass_count=$((pass_count + 1)) ;;
+            FAILED) fail_count=$((fail_count + 1)) ;;
+        esac
+    done < <(
+        tokenize_junit | awk '
+            function decode_entities(value) {
+                gsub(/&quot;/, "\"", value)
+                gsub(/&apos;/, "\047", value)
+                gsub(/&lt;/, "<", value)
+                gsub(/&gt;/, ">", value)
+                gsub(/&amp;/, "\\&", value)
+                return value
+            }
+
+            function emit_case() {
+                if (current_name == "") {
+                    return
+                }
+                current_status = "PASSED"
+                if (current_failed) {
+                    current_status = "FAILED"
+                } else if (current_skipped) {
+                    current_status = "SKIPPED"
+                }
+                printf "%s\t%s\n", decode_entities(current_name), current_status
+            }
+
+            /^<testcase / {
+                if (in_case) {
+                    emit_case()
+                }
+                in_case = 1
+                current_failed = 0
+                current_skipped = 0
+                current_name = $0
+                sub(/.* name="/, "", current_name)
+                sub(/".*/, "", current_name)
+                next
+            }
+
+            in_case && /^<failure[ >]/ { current_failed = 1; next }
+            in_case && /^<error[ >]/ { current_failed = 1; next }
+            in_case && /^<skipped[ >]/ { current_skipped = 1; next }
+
+            in_case && /^<\/testcase>/ {
+                emit_case()
+                in_case = 0
+                current_name = ""
+                next
+            }
+
+            END {
+                if (in_case) {
+                    emit_case()
+                }
+            }
+        '
+    )
+
+    duration=$(tokenize_junit | sed -n 's/.*<testsuite[^>]* time="\([^"]*\)".*/\1/p' | head -n 1)
+    duration=${duration%%.*}
+    duration=${duration:-0}
+
+    echo "${pass_count} passed, ${fail_count} failed in ${duration} seconds"
 }
 
-emit_check_progress() {
-    local json_file=$1
-
-    python3 - "${json_file}" <<'PY'
-import json
-import pathlib
-import sys
-
-data = json.loads(pathlib.Path(sys.argv[1]).read_text())
-result = data["results"][0]
-status = "PASSED" if result.get("success") else "FAILED"
-print(f'TEST: {result.get("testpath", "validator-check")} STATUS: {status}')
-PY
-}
-
-check_succeeded() {
-    local json_file=$1
-
-    python3 - "${json_file}" <<'PY'
-import json
-import pathlib
-import sys
-
-data = json.loads(pathlib.Path(sys.argv[1]).read_text())
-raise SystemExit(0 if data["results"][0].get("success") else 1)
-PY
+junit_is_valid() {
+    grep -q '<testsuite ' "${JUNIT_FILE}"
 }
 
 if [[ ! -x "${VALIDATOR_BIN}" ]]; then
@@ -165,14 +225,8 @@ fi
 if [[ "${DRY_RUN}" == "true" ]]; then
     (
         echo "Starting ${SUITE_NAME} dry-run"
-        dry_run_args=()
-        for check in "${CHECKS[@]}"; do
-            dry_run_args+=(--dry-run-check "${check}")
-        done
-        python3 "${CONVERTER}" \
-            --suite-name "${SUITE_NAME}" \
-            --junit-output "${JUNIT_FILE}" \
-            "${dry_run_args[@]}"
+        write_dry_run_junit
+        echo "collecting ... collected ${#CHECKS[@]} items"
         echo "0" > "${EXIT_CODE_FILE}"
     ) 2>&1 | tee "${LOG_FILE}"
     exit 0
@@ -180,73 +234,30 @@ fi
 
 (
     echo "Starting ${SUITE_NAME} checks"
-    overall_rc=0
-    builder_rc=0
-    converter_rc=0
-
     cd "${VALIDATOR_HOME}"
 
     : > "${STDERR_FILE}"
-    index=0
-    for check in "${CHECKS[@]}"; do
-        index=$((index + 1))
-        start_epoch=$(date +%s)
-        json_tmp=$(mktemp)
-        stderr_tmp=$(mktemp)
-        validator_rc=0
-        output_json="${RAW_RESULTS_DIR}/$(printf '%03d' "${index}")-$(echo "${check}" | tr '/.' '__' | tr -cd '[:alnum:]_-').json"
-
-        if ! "${VALIDATOR_BIN}" -o json --select "${check}" > "${json_tmp}" 2> "${stderr_tmp}"; then
-            validator_rc=$?
-        fi
-
-        end_epoch=$(date +%s)
-        duration=$((end_epoch - start_epoch))
-
-        if ! is_valid_single_result_json "${json_tmp}"; then
-            write_fallback_result "${json_tmp}" "${check}" "${validator_rc}" "${duration}" "${stderr_tmp}"
-        fi
-
-        mv "${json_tmp}" "${output_json}"
-
-        if [[ -s "${stderr_tmp}" ]]; then
-            {
-                echo "=== ${check} ==="
-                cat "${stderr_tmp}"
-                echo
-            } >> "${STDERR_FILE}"
-        fi
-
-        emit_check_progress "${output_json}"
-        if ! check_succeeded "${output_json}"; then
-            overall_rc=1
-        fi
-
-        rm -f "${stderr_tmp}"
-    done
-
-    if ! python3 "${SUMMARY_BUILDER}" \
-        --raw-dir "${RAW_RESULTS_DIR}" \
-        --combined-json "${RESULTS_JSON}"; then
-        builder_rc=$?
+    validator_rc=0
+    if ! "${VALIDATOR_BIN}" -o junit > "${JUNIT_FILE}" 2> "${STDERR_FILE}"; then
+        validator_rc=$?
     fi
 
-    if ! python3 "${CONVERTER}" \
-        --suite-name "${SUITE_NAME}" \
-        --junit-output "${JUNIT_FILE}" \
-        --input-json "${RESULTS_JSON}" \
-        --stderr-file "${STDERR_FILE}"; then
-        converter_rc=$?
+    if [[ -s "${STDERR_FILE}" ]]; then
+        echo "=== validator stderr ==="
+        cat "${STDERR_FILE}"
     fi
 
-    effective_rc="${overall_rc}"
-    if [[ "${effective_rc}" -eq 0 && "${builder_rc}" -ne 0 ]]; then
-        effective_rc="${builder_rc}"
-    fi
-    if [[ "${effective_rc}" -eq 0 && "${converter_rc}" -ne 0 ]]; then
-        effective_rc="${converter_rc}"
+    if ! junit_is_valid; then
+        message="validator did not produce valid JUnit output"
+        if [[ -s "${STDERR_FILE}" ]]; then
+            message=$(first_nonempty_line "${STDERR_FILE}" || true)
+            message=${message:-validator did not produce valid JUnit output}
+        fi
+        write_failure_junit "${message}"
+        validator_rc=1
     fi
 
-    echo "${effective_rc}" > "${EXIT_CODE_FILE}"
+    emit_junit_progress
+    echo "${validator_rc}" > "${EXIT_CODE_FILE}"
     exit 0
 ) 2>&1 | tee "${LOG_FILE}"
