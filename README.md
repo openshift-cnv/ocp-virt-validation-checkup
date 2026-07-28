@@ -248,52 +248,89 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e DRY_RU
 
 ### Windows Testing (Optional)
 
-The validation checkup supports optional Windows VM testing. When enabled, the checkup will:
-1. Create a Windows 11 golden image using the `windows-efi-installer` Tekton pipeline
-2. Run Windows-specific tests from the tier2 test suite
+The validation checkup supports optional Windows VM testing. There are two options:
 
-#### Prerequisites for Windows Testing
-- **OpenShift Pipelines operator** must be installed on the cluster
-- **Internet access** is required to download the Windows ISO and fetch the pipeline from Artifact Hub (see [Disconnected Environments](#disconnected-environments) for air-gapped clusters)
-- **Sufficient storage** for the Windows golden image (~64GB recommended)
+#### Option 1: Customer-Managed (Apply Manifest)
 
-#### Enabling Windows Testing
-To enable Windows testing, set the `ACCEPT_WINDOWS_EULA` environment variable to `true`:
+A ready-to-use manifest is provided that creates a Windows Server 2022 golden image from scratch using a Tekton pipeline. It includes namespace, RBAC, sysprep configuration, and a PipelineRun — single `oc apply`, full automation.
+
+**Prerequisites:**
+- **OpenShift Pipelines operator** must be installed
+- **cluster-admin** access (for privileged SCC assignment)
+- **Internet access** to download the Windows ISO and fetch the pipeline from Artifact Hub (see [`disconnected/README.md`](disconnected/README.md) for air-gapped setups)
+- **Sufficient storage** (~64GB recommended for the Windows image)
+
+**Setup:**
+
+1. Apply the manifest:
+```bash
+oc apply -f manifests/windows/golden-image.yaml
+```
+2. Wait for the pipeline to complete (~1-2 hours):
+```bash
+oc get pipelinerun -n validation-os-images -w
+```
+3. Verify the DataSource is Ready:
+```bash
+oc get datasource win2k22 -n validation-os-images -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+```
+4. Run the tool normally (no `ACCEPT_WINDOWS_EULA` needed):
+```bash
+podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} ${OCP_VIRT_VALIDATION_IMAGE} generate | oc apply -f -
+```
+
+The tool detects the existing DataSource and runs Windows tests automatically. After tests complete, **nothing is deleted** — your resources remain for future runs.
+
+The manifest also includes a commented-out alternative (Method 2) for users who already have a prepared Windows image and want to import via HTTP, registry, or upload.
+
+See [`manifests/windows/golden-image.yaml`](manifests/windows/golden-image.yaml) for full details and image requirements.
+
+#### Option 2: Automated (Tool Creates Everything)
+
+The tool downloads a Windows Server 2022 ISO, runs a Tekton pipeline to install it, and creates all resources. Everything is cleaned up after tests finish.
+
+**Prerequisites:**
+- **OpenShift Pipelines operator** must be installed
+- **Internet access** to download the ISO and fetch the pipeline from Artifact Hub
+- **Sufficient storage** (~64GB recommended)
+- **`STORAGE_CLASS`** set to a valid storage class (required by the Windows setup script)
+
+**Usage:**
 ```bash
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
     -e ACCEPT_WINDOWS_EULA=true \
+    -e STORAGE_CLASS=<your-storage-class> \
     ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 
 **Note:** By setting `ACCEPT_WINDOWS_EULA=true`, you acknowledge acceptance of Microsoft's End User License Agreement for Windows.
 
-#### Optional Windows Parameters
+**Optional Parameters:**
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `ACCEPT_WINDOWS_EULA` | Enable Windows testing (must be `true` to enable) | `false` |
-| `WIN_IMAGE_DOWNLOAD_URL` | Custom Windows 11 ISO download URL | Default Microsoft URL |
-| `WIN_IMAGE_NAME` | Name of an existing Windows DataSource to use (skips golden image creation) | _(none)_ |
+| `WIN_IMAGE_DOWNLOAD_URL` | Custom Windows Server 2022 ISO download URL | Default Microsoft URL |
 | `TEKTON_PIPELINE_VERSION` | Version of the `windows-efi-installer` pipeline | `>=v4.21.0` |
 
 Example with custom ISO URL:
 ```bash
 $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
     -e ACCEPT_WINDOWS_EULA=true \
-    -e WIN_IMAGE_DOWNLOAD_URL="https://my-internal-server/windows11.iso" \
+    -e STORAGE_CLASS=<your-storage-class> \
+    -e WIN_IMAGE_DOWNLOAD_URL="https://my-internal-server/SERVER_EVAL_x64FRE_en-us.iso" \
     ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
 
-#### How It Works
-When Windows testing is enabled:
+**How It Works:**
 1. The checkup verifies that the OpenShift Pipelines operator is installed
-2. A Windows 11 golden image is created in the `openshift-virtualization-os-images` namespace using the `windows-efi-installer` Tekton pipeline (fetched automatically via the hub resolver)
-3. The tier2 test suite includes Windows-specific tests marked with `@pytest.mark.windows`
-4. The golden image is reused for subsequent runs if it already exists
+2. Creates the `validation-os-images` namespace, RBAC, and runs the `windows-efi-installer` Tekton pipeline
+3. The pipeline downloads the ISO and installs Windows Server 2022 with OpenSSH, QEMU guest agent, and firewall disabled
+4. A DataSource (`win2k22`) is created backed by the output PVC
+5. The tier2 test suite runs tests matching `@pytest.mark.conformance`; when no golden image is available, tests with `@pytest.mark.windows` are excluded
+6. After tests complete, the entire `validation-os-images` namespace is deleted
 
-**Note:** The initial Windows image creation takes approximately 60-90 minutes. Subsequent runs will skip this step if the golden image already exists.
-
-**Note:** Windows-specific tests require the `@pytest.mark.windows` marker to be added to the [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository. Until then, enabling Windows testing will prepare the golden image but no Windows-specific tests will run.
+**Note:** The initial Windows image creation takes approximately 1-2 hours (up to 3 hours on slow networks).
 
 ## Disconnected Environments
 The validation checkup can be run on disconnected (air-gapped) OpenShift clusters by mirroring the required test images to an accessible registry and configuring mirror sets (ITMS + IDMS). No changes to the checkup configuration are needed -- mirror sets transparently redirect image pulls at the CRI-O level.

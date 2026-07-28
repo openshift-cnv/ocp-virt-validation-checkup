@@ -6,6 +6,9 @@ readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/funcs.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
+export GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
+export GOLDEN_IMAGE_NAME="${GOLDEN_IMAGE_NAME:-win2k22}"
+
 create_kubeconfig
 
 # Add owner reference to PVC so it gets cleaned up when the job is deleted
@@ -181,6 +184,17 @@ CURRENT_TEST_PID=""
 # Progress watcher PID (will be started later after storage config is set)
 PROGRESS_WATCHER_PID=""
 
+# Cleanup Windows golden image resources.
+# Only clean up what the current run created.
+# EULA gate: if this run didn't create the namespace, don't touch it.
+# Label gate: if the namespace isn't tool-labeled, it belongs to the user (BYOI).
+cleanup_windows_resources() {
+    if [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
+        return
+    fi
+    cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+}
+
 # Function to cleanup progress watcher and forward signals
 cleanup_and_forward_signal() {
     echo "Entrypoint received termination signal, cleaning up..."
@@ -202,6 +216,8 @@ cleanup_and_forward_signal() {
         wait "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
         echo "Progress watcher stopped."
     fi
+
+    cleanup_windows_resources
     
     exit 1
 }
@@ -387,19 +403,20 @@ fi
 # ======================
 # Windows Golden Image Setup
 # ======================
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
-  echo "Setting up Windows golden image for Windows tests..."
-  WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
-  if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
-    # Export variables needed by the Windows setup script
-    export STORAGE_CLASS
-    export WIN_IMAGE_DOWNLOAD_URL
-    export WIN_IMAGE_NAME
-    export TEKTON_PIPELINE_VERSION
-    export ACCEPT_WINDOWS_EULA
-    bash "${WINDOWS_SETUP_SCRIPT}"
-  else
-    echo "Warning: Windows setup script not found at ${WINDOWS_SETUP_SCRIPT}"
+# Run the Windows setup script which handles both paths:
+#   - BYOI: DataSource exists and is Ready → exits immediately
+#   - Tool-created: ACCEPT_WINDOWS_EULA=true → runs pipeline
+WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
+if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
+  export STORAGE_CLASS
+  export WIN_IMAGE_DOWNLOAD_URL
+  export TEKTON_PIPELINE_VERSION
+  export ACCEPT_WINDOWS_EULA
+  if ! bash "${WINDOWS_SETUP_SCRIPT}"; then
+    echo "WARNING: Windows golden image setup failed. Windows tests will be skipped."
+    echo "All other test suites will continue normally."
+    cleanup_windows_resources
+    unset ACCEPT_WINDOWS_EULA
   fi
 fi
 
@@ -499,6 +516,11 @@ if [ -d "${RESULTS_DIR}/.dry-run" ]; then
     echo "Cleaning up .dry-run directory..."
     rm -rf "${RESULTS_DIR}/.dry-run"
 fi
+
+# ================================
+# Windows Golden Image Cleanup
+# ================================
+cleanup_windows_resources
 
 # =========
 # Summarize

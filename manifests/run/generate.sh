@@ -20,7 +20,6 @@ STORAGE_CLASS=${STORAGE_CLASS:-""}
 STORAGE_CAPABILITIES=${STORAGE_CAPABILITIES:-""}
 ACCEPT_WINDOWS_EULA=${ACCEPT_WINDOWS_EULA:-"false"}
 WIN_IMAGE_DOWNLOAD_URL=${WIN_IMAGE_DOWNLOAD_URL:-""}
-WIN_IMAGE_NAME=${WIN_IMAGE_NAME:-""}
 TEKTON_PIPELINE_VERSION=${TEKTON_PIPELINE_VERSION:-""}
 
 # Calculate storage size based on test suites (2Gi per suite, 10Gi for tier2)
@@ -224,8 +223,6 @@ spec:
               value: "${ACCEPT_WINDOWS_EULA}"
             - name: WIN_IMAGE_DOWNLOAD_URL
               value: "${WIN_IMAGE_DOWNLOAD_URL}"
-            - name: WIN_IMAGE_NAME
-              value: "${WIN_IMAGE_NAME}"
             - name: TEKTON_PIPELINE_VERSION
               value: "${TEKTON_PIPELINE_VERSION}"
           volumeMounts:
