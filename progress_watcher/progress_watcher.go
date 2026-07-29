@@ -549,6 +549,11 @@ func runDryRunForSuite(suiteName, resultsDir string) int {
 	}
 
 	// Add suite-specific environment variables
+	if suiteName == "network" {
+		if bindingPlugin := os.Getenv("PRIMARY_NETWORK_BINDING_PLUGIN"); bindingPlugin != "" {
+			env = append(env, fmt.Sprintf("PRIMARY_NETWORK_BINDING_PLUGIN=%s", bindingPlugin))
+		}
+	}
 	if suiteName == "tier2" {
 		// tier2 needs storage class and subscription info
 		if defaultStorageClass := os.Getenv("DEFAULT_STORAGE_CLASS"); defaultStorageClass != "" {
