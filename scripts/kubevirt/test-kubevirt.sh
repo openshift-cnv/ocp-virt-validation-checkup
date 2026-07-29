@@ -225,9 +225,9 @@ fi
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
 # Build primary network binding plugin flag for network tests
-BINDING_PLUGIN_FLAG=""
+BINDING_PLUGIN_ARGS=()
 if [ "${SIG}" == "network" ] && [ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" ]; then
-  BINDING_PLUGIN_FLAG="--primary-network-binding-plugin=${PRIMARY_NETWORK_BINDING_PLUGIN}"
+  BINDING_PLUGIN_ARGS+=("--primary-network-binding-plugin=${PRIMARY_NETWORK_BINDING_PLUGIN}")
   echo "Using primary network binding plugin: ${PRIMARY_NETWORK_BINDING_PLUGIN}"
 fi
 
@@ -256,7 +256,7 @@ echo "Starting ${SIG} tests 🧪"
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
-    ${BINDING_PLUGIN_FLAG} \
+    "${BINDING_PLUGIN_ARGS[@]}" \
     "${skip_arg}"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt &
 
 # Store the PID for cleanup

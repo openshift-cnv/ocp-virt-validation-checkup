@@ -113,6 +113,13 @@ if [[ -n "${STORAGE_CAPABILITIES}" ]]; then
   fi
 fi
 
+# Validate PRIMARY_NETWORK_BINDING_PLUGIN format (must be a valid plugin name: alphanumeric, '-', '.')
+if [[ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" && ! "${PRIMARY_NETWORK_BINDING_PLUGIN}" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+  echo "Error: Invalid PRIMARY_NETWORK_BINDING_PLUGIN value: '${PRIMARY_NETWORK_BINDING_PLUGIN}'"
+  echo "Expected: a valid plugin name (alphanumeric characters, '-', '.', must start with alphanumeric)"
+  exit 1
+fi
+
 
 # Namespace
 cat <<EOF
