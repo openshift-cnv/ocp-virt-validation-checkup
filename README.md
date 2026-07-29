@@ -240,6 +240,21 @@ In this case, `storageRWXFileSystem` should be set.
 
 **Note** If the `storageSnapshot` storage capability is not passed, tests that are requiring snapshots will fail with error. The snapshot tests are not skipped because they are a core functionality of OpenShift Virtualization.
 
+#### Primary Network Binding Plugin
+When running the `network` test suite with a custom network binding plugin, the `PRIMARY_NETWORK_BINDING_PLUGIN` environment variable can be set to the name of the binding plugin to test. This passes the `--primary-network-binding-plugin` flag to the upstream KubeVirt conformance tests, enabling CNI vendors and network binding plugin authors to certify their implementations.
+
+When this parameter is set:
+- The `netCustomBindingPlugins` label filter exclusion is removed (these tests are now relevant)
+- Masquerade-specific tests (labeled `interface-ports`, `network-cidr`, `IPv6`) are excluded, as they are not applicable when a non-masquerade binding plugin is in use
+
+Example:
+```bash
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
+    -e TEST_SUITES=network \
+    -e PRIMARY_NETWORK_BINDING_PLUGIN=my-binding-plugin \
+    ${OCP_VIRT_VALIDATION_IMAGE} generate
+```
+
 #### Dry Run
 In order to see which tests are going to be run, without actually executing them on the cluster, a `DRY_RUN` environment variable can be set:
 ```bash
