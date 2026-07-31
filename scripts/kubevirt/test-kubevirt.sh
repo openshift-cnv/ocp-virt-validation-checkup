@@ -2,10 +2,6 @@
 
 set -e
 
-function escape() {
-    echo "$1" | sed -E 's/([][()| ])/\\\1/g'
-}
-
 # Global variable to track if disk-images-provider was applied
 DISK_IMAGES_PROVIDER_APPLIED=false
 
@@ -92,27 +88,7 @@ if [ -n "${TEST_SKIPS}" ]; then
   skip_tests+=("${TEST_SKIPS}")
 fi
 
-IFS=$'\n'
-for test_id in $(
-    jq -s '.[0] + .[1]' \
-        "${SCRIPT_DIR}/config/quarantined_tests.json" \
-        "${SCRIPT_DIR}/config/dont_run_tests.json" | \
-        jq -r '.[].id'
-); do
-    skip_tests+=("$(escape "${test_id}")")
-done
-
 label_filter=()
-
-skip_tests_labels_file="${SCRIPT_DIR}/config/dont_run_tests_labels.json"
-for ginkgo_label_name in $(jq -r '.[].ginkgo_label_name' $skip_tests_labels_file); do
-  # When a primary network binding plugin is specified for network tests,
-  # include netCustomBindingPlugins tests (we are testing a custom binding plugin)
-  if [ "${SIG}" == "network" ] && [ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" ] && [ "$ginkgo_label_name" == "netCustomBindingPlugins" ]; then
-    continue
-  fi
-  label_filter+=( "!($ginkgo_label_name)" )
-done
 
 # When a primary network binding plugin is in use, exclude masquerade-specific tests
 if [ "${SIG}" == "network" ] && [ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" ]; then

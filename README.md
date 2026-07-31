@@ -244,7 +244,6 @@ In this case, `storageRWXFileSystem` should be set.
 When running the `network` test suite with a custom network binding plugin, the `PRIMARY_NETWORK_BINDING_PLUGIN` environment variable can be set to the name of the binding plugin to test. This passes the `--primary-network-binding-plugin` flag to the upstream KubeVirt conformance tests, enabling CNI vendors and network binding plugin authors to certify their implementations.
 
 When this parameter is set:
-- The `netCustomBindingPlugins` label filter exclusion is removed (these tests are now relevant)
 - Masquerade-specific tests (labeled `interface-ports`, `network-cidr`, `IPv6`) are excluded, as they are not applicable when a non-masquerade binding plugin is in use
 
 Example:
