@@ -340,8 +340,6 @@ spec:
       value: "true"
     - name: baseDvName
       value: "win2k22"
-    - name: baseDvNamespace
-      value: "validation-os-images"
     - name: instanceTypeName
       value: "u1.large"
     - name: instanceTypeKind
@@ -352,9 +350,6 @@ spec:
       value: "win2k22-autounattend"
     - name: isoDVName
       value: "win2k22-iso"
-    # Optional: Set storage class. If omitted, the cluster default is used.
-    # - name: baseDvStorageClass
-    #   value: "my-storage-class"
   taskRunSpecs:
     - pipelineTaskName: modify-windows-iso-file
       podTemplate:

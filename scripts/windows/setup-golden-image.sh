@@ -133,8 +133,6 @@ spec:
       value: "${ACCEPT_WINDOWS_EULA}"
     - name: baseDvName
       value: "${GOLDEN_IMAGE_NAME}"
-    - name: baseDvNamespace
-      value: "${GOLDEN_IMAGE_NAMESPACE}"
     - name: instanceTypeName
       value: "${INSTANCE_TYPE}"
     - name: instanceTypeKind
@@ -143,8 +141,6 @@ spec:
       value: "windows.2k22"
     - name: autounattendConfigMapName
       value: "${AUTOUNATTEND_CM_NAME}"
-    - name: baseDvStorageClass
-      value: "${STORAGE_CLASS}"
     - name: isoDVName
       value: "${GOLDEN_IMAGE_NAME}-iso"
   taskRunSpecs:
