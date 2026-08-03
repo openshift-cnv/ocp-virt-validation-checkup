@@ -307,7 +307,7 @@ The tool downloads a Windows Server 2022 ISO, runs a Tekton pipeline to install 
 - **OpenShift Pipelines operator** must be installed
 - **Internet access** to download the ISO and fetch the pipeline from Artifact Hub
 - **Sufficient storage** (~64GB recommended)
-- **`STORAGE_CLASS`** set to a valid storage class (required by the Windows setup script)
+- **`STORAGE_CLASS`** set to a valid storage class
 
 **Usage:**
 ```bash
