@@ -505,7 +505,7 @@ if ! oc get crd pipelines.tekton.dev &>/dev/null; then
   echo "  1. Go to OperatorHub in the OpenShift Console"
   echo "  2. Search for 'Red Hat OpenShift Pipelines'"
   echo "  3. Install the operator"
-  exit 2
+  exit ${EXIT_WINDOWS_SKIP}
 fi
 echo "OpenShift Pipelines operator is installed"
 
