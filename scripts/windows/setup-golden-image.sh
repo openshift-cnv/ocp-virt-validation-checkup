@@ -33,6 +33,12 @@ source "${SCRIPT_DIR}/../funcs.sh"
 GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
 GOLDEN_IMAGE_NAME="${GOLDEN_IMAGE_NAME:-win2k22}"
 
+# Exit code contract (must stay in sync with entrypoint.sh):
+#   0 = success or expected skip (BYOI ready, EULA not set)
+#   2 = prerequisite missing (e.g. Pipelines operator not installed) — caller skips gracefully
+#   1 = real failure (pipeline ran and failed, timeout, config error) — caller hard-fails
+readonly EXIT_WINDOWS_SKIP=2
+
 DEFAULT_WIN_IMAGE_URL="https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
 WIN_IMAGE_URL="${WIN_IMAGE_DOWNLOAD_URL:-${DEFAULT_WIN_IMAGE_URL}}"
 
@@ -74,6 +80,34 @@ cleanup_autounattend_cm() {
 
 cleanup_namespace() {
   cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+}
+
+dump_windows_debug_info() {
+  echo "=== Windows Setup Debug Info ==="
+
+  if oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
+    echo "--- PipelineRuns ---"
+    oc get pipelinerun -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
+
+    if [ -n "${PIPELINE_RUN_NAME:-}" ]; then
+      echo "--- PipelineRun ${PIPELINE_RUN_NAME} conditions ---"
+      oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+        -o jsonpath='{.status.conditions}' 2>/dev/null | jq . || true
+    fi
+
+    echo "--- TaskRuns ---"
+    oc get taskrun -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      -o custom-columns='NAME:.metadata.name,STATUS:.status.conditions[0].reason,MESSAGE:.status.conditions[0].message' \
+      2>/dev/null || true
+
+    echo "--- Events (last 20) ---"
+    oc get events -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      --sort-by='.lastTimestamp' 2>/dev/null | tail -20 || true
+  else
+    echo "Namespace ${GOLDEN_IMAGE_NAMESPACE} does not exist — no resources to dump"
+  fi
+
+  echo "=== End Debug Info ==="
 }
 
 run_pipeline() {
@@ -456,6 +490,11 @@ fi
 
 echo "Microsoft EULA accepted by user"
 
+# Set trap early so dump_windows_debug_info fires for real failures.
+# Exit ${EXIT_WINDOWS_SKIP} (prerequisite missing) is a routine skip — skip the dump.
+CREATED_PIPELINE_SA=false
+trap 'exit_code=$?; [ $exit_code -ne 0 ] && [ $exit_code -ne '"${EXIT_WINDOWS_SKIP}"' ] && dump_windows_debug_info; cleanup_pipeline_sa; cleanup_autounattend_cm; if [ $exit_code -ne 0 ]; then cleanup_namespace; fi' EXIT
+
 echo "Checking if OpenShift Pipelines operator is installed..."
 if ! oc get crd pipelines.tekton.dev &>/dev/null; then
   echo "WARNING: OpenShift Pipelines operator is not installed."
@@ -466,13 +505,11 @@ if ! oc get crd pipelines.tekton.dev &>/dev/null; then
   echo "  1. Go to OperatorHub in the OpenShift Console"
   echo "  2. Search for 'Red Hat OpenShift Pipelines'"
   echo "  3. Install the operator"
-  exit 1
+  exit ${EXIT_WINDOWS_SKIP}
 fi
 echo "OpenShift Pipelines operator is installed"
 
 # Tool-managed: create namespace, RBAC, run pipeline, create DataSource, cleanup on completion
-CREATED_PIPELINE_SA=false
-trap 'exit_code=$?; cleanup_pipeline_sa; cleanup_autounattend_cm; if [ $exit_code -ne 0 ]; then cleanup_namespace; fi' EXIT
 
 echo "Ensuring namespace ${GOLDEN_IMAGE_NAMESPACE} exists..."
 if ! oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then

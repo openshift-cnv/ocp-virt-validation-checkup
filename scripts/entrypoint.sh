@@ -406,18 +406,38 @@ fi
 # Run the Windows setup script which handles both paths:
 #   - BYOI: DataSource exists and is Ready → exits immediately
 #   - Tool-created: ACCEPT_WINDOWS_EULA=true → runs pipeline
+# Exit code contract with setup-golden-image.sh (must stay in sync):
+#   0              = success or expected skip (BYOI ready, EULA not set)
+#   EXIT_WINDOWS_SKIP = prerequisite missing (e.g. Pipelines not installed) — skip gracefully
+#   anything else  = real failure (pipeline ran and failed, timeout, config error) — hard fail
+readonly EXIT_WINDOWS_SKIP=2
+
 WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
 if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
   export STORAGE_CLASS
   export WIN_IMAGE_DOWNLOAD_URL
   export TEKTON_PIPELINE_VERSION
   export ACCEPT_WINDOWS_EULA
-  if ! bash "${WINDOWS_SETUP_SCRIPT}"; then
-    echo "WARNING: Windows golden image setup failed. Windows tests will be skipped."
-    echo "All other test suites will continue normally."
-    cleanup_windows_resources
-    unset ACCEPT_WINDOWS_EULA
-  fi
+  WINDOWS_SETUP_EXIT=0
+  bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
+  case $WINDOWS_SETUP_EXIT in
+    0)
+      # Success or expected skip (BYOI ready, EULA not set)
+      ;;
+    "${EXIT_WINDOWS_SKIP}")
+      # Missing prerequisite: skip gracefully
+      # setup-golden-image.sh's EXIT trap already cleaned up its resources
+      echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
+      echo "All other test suites will continue normally."
+      unset ACCEPT_WINDOWS_EULA
+      ;;
+    *)
+      # Pipeline or setup failure: hard fail so CI detects the problem
+      # setup-golden-image.sh's EXIT trap already cleaned up its resources
+      echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
+      exit 1
+      ;;
+  esac
 fi
 
 # Start progress watcher in background AFTER storage config is set
