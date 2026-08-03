@@ -408,9 +408,9 @@ fi
 #   - Tool-created: ACCEPT_WINDOWS_EULA=true → runs pipeline
 # Exit code contract with setup-golden-image.sh (must stay in sync):
 #   0              = success or expected skip (BYOI ready, EULA not set)
-#   EXIT_WIN_SKIP  = prerequisite missing (e.g. Pipelines not installed) — skip gracefully
+#   EXIT_WINDOWS_SKIP = prerequisite missing (e.g. Pipelines not installed) — skip gracefully
 #   anything else  = real failure (pipeline ran and failed, timeout, config error) — hard fail
-readonly EXIT_WIN_SKIP=2
+readonly EXIT_WINDOWS_SKIP=2
 
 WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
 if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
@@ -424,7 +424,7 @@ if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
     0)
       # Success or expected skip (BYOI ready, EULA not set)
       ;;
-    "${EXIT_WIN_SKIP}")
+    "${EXIT_WINDOWS_SKIP}")
       # Missing prerequisite: skip gracefully
       # setup-golden-image.sh's EXIT trap already cleaned up its resources
       echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
