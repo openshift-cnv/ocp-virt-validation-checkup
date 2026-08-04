@@ -264,6 +264,8 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e DRY_RU
 
 The validation checkup supports optional Windows VM testing. There are two options:
 
+**Note:** Both options below require **internet access** (connected cluster). For disconnected environments, provide your own pre-built Windows golden image (BYOI) with SSH and guest agent pre-installed. See [`disconnected/README.md`](disconnected/README.md) for details.
+
 #### Option 1: Customer-Managed (Apply Manifest)
 
 A ready-to-use manifest is provided that creates a Windows Server 2022 golden image from scratch using a Tekton pipeline. It includes namespace, RBAC, sysprep configuration, and a PipelineRun — single `oc apply`, full automation.
@@ -271,7 +273,7 @@ A ready-to-use manifest is provided that creates a Windows Server 2022 golden im
 **Prerequisites:**
 - **OpenShift Pipelines operator** must be installed
 - **cluster-admin** access (for privileged SCC assignment)
-- **Internet access** to download the Windows ISO and fetch the pipeline from Artifact Hub (see [`disconnected/README.md`](disconnected/README.md) for air-gapped setups)
+- **Internet access** to download the Windows ISO and fetch the pipeline from Artifact Hub
 - **Sufficient storage** (~64GB recommended for the Windows image)
 
 **Setup:**
@@ -341,8 +343,9 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
 2. Creates the `validation-os-images` namespace, RBAC, and runs the `windows-efi-installer` Tekton pipeline
 3. The pipeline downloads the ISO and installs Windows Server 2022 with OpenSSH, QEMU guest agent, and firewall disabled
 4. A DataSource (`win2k22`) is created backed by the output PVC
-5. The tier2 test suite runs tests matching `@pytest.mark.conformance`; when no golden image is available, tests with `@pytest.mark.windows` are excluded
-6. After tests complete, the entire `validation-os-images` namespace is deleted
+5. A temporary VM (`win-ssh-verify-*`) boots from the golden image to verify SSH (port 22) is reachable. If verification fails the entire checkup aborts — check `C:\post-update.log` inside the golden image for diagnosis.
+6. The tier2 test suite runs tests matching `@pytest.mark.conformance`; when no golden image is available, tests with `@pytest.mark.windows` are excluded
+7. After tests complete, the entire `validation-os-images` namespace is deleted
 
 **Note:** The initial Windows image creation takes approximately 1-2 hours (up to 3 hours on slow networks).
 

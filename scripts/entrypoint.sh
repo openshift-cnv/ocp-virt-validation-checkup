@@ -51,9 +51,7 @@ add_pvc_owner_reference() {
   echo "Found owner Job: ${job_name} (UID: ${job_uid})"
 
   # Patch PVC with owner reference
-  oc patch pvc "${pvc_name}" -n "${namespace}" --type=json -p "[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[{\"apiVersion\":\"batch/v1\",\"kind\":\"Job\",\"name\":\"${job_name}\",\"uid\":\"${job_uid}\",\"controller\":true,\"blockOwnerDeletion\":true}]}]" 2>/dev/null
-
-  if [ $? -eq 0 ]; then
+  if oc patch pvc "${pvc_name}" -n "${namespace}" --type=json -p "[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[{\"apiVersion\":\"batch/v1\",\"kind\":\"Job\",\"name\":\"${job_name}\",\"uid\":\"${job_uid}\",\"controller\":true,\"blockOwnerDeletion\":true}]}]" 2>/dev/null; then
     echo "Successfully added owner reference to PVC ${pvc_name}"
   else
     echo "Warning: Failed to add owner reference to PVC ${pvc_name}"
@@ -408,8 +406,8 @@ fi
 #   - Tool-created: ACCEPT_WINDOWS_EULA=true → runs pipeline
 # Exit code contract with setup-golden-image.sh (must stay in sync):
 #   0              = success or expected skip (BYOI ready, EULA not set)
-#   EXIT_WINDOWS_SKIP = prerequisite missing (e.g. Pipelines not installed) — skip gracefully
-#   anything else  = real failure (pipeline ran and failed, timeout, config error) — hard fail
+#   EXIT_WINDOWS_SKIP = prerequisite missing (no internet, pipeline not installed) — skip Windows gracefully, other suites continue
+#   anything else  = real failure (pipeline ran and failed, timeout, config error) — hard fail so CI detects it
 readonly EXIT_WINDOWS_SKIP=2
 
 WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
@@ -420,20 +418,15 @@ if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
   export ACCEPT_WINDOWS_EULA
   WINDOWS_SETUP_EXIT=0
   bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
-  case $WINDOWS_SETUP_EXIT in
+  case ${WINDOWS_SETUP_EXIT} in
     0)
-      # Success or expected skip (BYOI ready, EULA not set)
       ;;
     "${EXIT_WINDOWS_SKIP}")
-      # Missing prerequisite: skip gracefully
-      # setup-golden-image.sh's EXIT trap already cleaned up its resources
       echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
       echo "All other test suites will continue normally."
       unset ACCEPT_WINDOWS_EULA
       ;;
     *)
-      # Pipeline or setup failure: hard fail so CI detects the problem
-      # setup-golden-image.sh's EXIT trap already cleaned up its resources
       echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
       exit 1
       ;;

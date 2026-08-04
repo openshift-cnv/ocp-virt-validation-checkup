@@ -82,6 +82,131 @@ cleanup_namespace() {
   cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
 }
 
+verify_ssh_on_golden_image() {
+  local test_vm_name="win-ssh-verify-$$"
+  local test_dv_name="${test_vm_name}-dv"
+  trap 'echo "Cleaning up test VM..."; oc delete vm "${test_vm_name}" -n "${GOLDEN_IMAGE_NAMESPACE}" --wait=false 2>/dev/null || true' RETURN
+  echo "Booting test VM '${test_vm_name}' from golden image to verify SSH..."
+
+  oc apply -n "${GOLDEN_IMAGE_NAMESPACE}" -f - <<VMEOF
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: ${test_vm_name}
+  labels:
+    app: ocp-virt-validation
+spec:
+  runStrategy: Always
+  instancetype:
+    kind: VirtualMachineClusterInstancetype
+    name: ${INSTANCE_TYPE}
+  preference:
+    kind: VirtualMachineClusterPreference
+    name: windows.2k22
+  template:
+    spec:
+      domain:
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+              ports:
+                - port: 22
+        resources: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: ${test_dv_name}
+  dataVolumeTemplates:
+    - metadata:
+        name: ${test_dv_name}
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: ${GOLDEN_IMAGE_NAME}
+          namespace: ${GOLDEN_IMAGE_NAMESPACE}
+        storage:
+          storageClassName: ${STORAGE_CLASS}
+          resources:
+            requests:
+              storage: 20Gi
+VMEOF
+
+  local verify_timeout=600
+  local elapsed=0
+  local agent_ready=false
+  echo "Waiting for test VM guest agent (up to ${verify_timeout}s)..."
+  while [ ${elapsed} -lt ${verify_timeout} ]; do
+    local agent_status
+    agent_status=$(oc get vmi "${test_vm_name}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="AgentConnected")].status}' 2>/dev/null || echo "")
+    if [ "${agent_status}" == "True" ]; then
+      agent_ready=true
+      echo "Guest agent connected after ${elapsed}s"
+      break
+    fi
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+
+  if [ "${agent_ready}" != "true" ]; then
+    echo "ERROR: Test VM guest agent did not connect within ${verify_timeout}s"
+    return 1
+  fi
+
+  # Give sshd a few seconds to start after boot
+  sleep 10
+
+  local launcher_pod=""
+  local lp_attempt
+  for lp_attempt in 1 2 3; do
+    launcher_pod=$(oc get pods -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      -l "kubevirt.io=virt-launcher" --no-headers 2>/dev/null \
+      | grep "${test_vm_name}" | awk '{print $1}' | head -1)
+    [ -n "${launcher_pod}" ] && break
+    echo "  Waiting for launcher pod (attempt ${lp_attempt}/3)..."
+    sleep 5
+  done
+  if [ -z "${launcher_pod}" ]; then
+    echo "ERROR: Could not find launcher pod for test VM"
+    echo "  Pods in namespace:"
+    oc get pods -n "${GOLDEN_IMAGE_NAMESPACE}" --no-headers 2>/dev/null || true
+    return 1
+  fi
+  echo "Found launcher pod: ${launcher_pod}"
+
+  local ssh_ok=false
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    echo "  SSH check attempt ${attempt}/6 on 127.0.0.1:22 (via compute container)..."
+    if oc exec -n "${GOLDEN_IMAGE_NAMESPACE}" "${launcher_pod}" -c compute -- \
+        timeout 10 bash -c "echo '' > /dev/tcp/127.0.0.1/22" 2>/dev/null; then
+      ssh_ok=true
+      echo "  Port 22 is OPEN — SSH is working!"
+      break
+    fi
+    echo "  Port 22 not ready yet, waiting 15s..."
+    sleep 15
+  done
+
+  if [ "${ssh_ok}" == "true" ]; then
+    echo "SSH verification PASSED"
+    return 0
+  else
+    echo "ERROR: SSH verification FAILED — port 22 is not open on the golden image"
+    echo "OpenSSH was likely not installed during Windows setup."
+    echo "Check the post-update.ps1 transcript (C:\\post-update.log) inside the golden image for details."
+    return 1
+  fi
+}
+
 dump_windows_debug_info() {
   echo "=== Windows Setup Debug Info ==="
 
@@ -208,13 +333,14 @@ EOF
         echo "Pipeline completed successfully!"
         break
         ;;
-      "Failed"|"PipelineRunTimeout"|"TaskRunCancelled"|"CouldntGetPipeline")
-        if [ "${STATUS}" == "CouldntGetPipeline" ]; then
-          echo "ERROR: Failed to fetch pipeline from artifacthub."
-          echo "For disconnected environments, manually install the pipeline first:"
-          echo "  https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer"
-          exit 1
-        fi
+      "CouldntGetPipeline"|"CouldntGetTask")
+        echo "ERROR: Failed to resolve pipeline/tasks from Artifact Hub (status: ${STATUS})."
+        echo "The Tekton hub resolver requires internet access."
+        echo "In disconnected environments, provide your own golden image (BYOI) instead of using ACCEPT_WINDOWS_EULA."
+        echo "See: disconnected/README.md"
+        exit ${EXIT_WINDOWS_SKIP}
+        ;;
+      "Failed"|"PipelineRunTimeout"|"TaskRunCancelled")
         echo "ERROR: Pipeline failed with status: ${STATUS}"
         oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o yaml | tail -50
         exit 1
@@ -355,6 +481,20 @@ data:
           </UserData>
         </component>
       </settings>
+      <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <ComputerName>*</ComputerName>
+        </component>
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <RunSynchronous>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>1</Order>
+              <Path>reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Network\\NewNetworkWindowOff" /f</Path>
+              <Description>Suppress network location dialog</Description>
+            </RunSynchronousCommand>
+          </RunSynchronous>
+        </component>
+      </settings>
       <settings pass="oobeSystem">
         <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
           <InputLocale>0409:00000409</InputLocale>
@@ -399,21 +539,99 @@ data:
       </settings>
     </unattend>
   post-update.ps1: |
+    Start-Transcript -Path "C:\\post-update.log" -Force
+    \$sshInstalled = \$false
     try {
-      \$ErrorActionPreference = 'Stop'
+      # Install QEMU guest agent (with timeout to avoid hangs)
+      \$gaJob = Start-Job { \$p = Start-Process msiexec -Wait -PassThru -ArgumentList "/i E:\\guest-agent\\qemu-ga-x86_64.msi /qn /norestart"; \$p.ExitCode }
+      if (-not (Wait-Job \$gaJob -Timeout 120)) {
+        Stop-Job \$gaJob; Remove-Job \$gaJob -Force
+        Write-Host "WARNING: QEMU guest agent installer timed out after 120s -- continuing"
+      } else {
+        \$exitCode = Receive-Job \$gaJob; Remove-Job \$gaJob
+        if (\$exitCode -ne 0 -and \$exitCode -ne 3010) {
+          Write-Host "WARNING: QEMU guest agent installer exited \$exitCode -- continuing"
+        }
+      }
 
-      # Install QEMU guest agent
-      Start-Process msiexec -Wait -ArgumentList "/i E:\\guest-agent\\qemu-ga-x86_64.msi /qn /passive /norestart"
+      # Disable Windows Firewall first (ensures VM is reachable regardless of SSH outcome)
+      Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction Stop
 
-      # Install and start OpenSSH server
-      Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-      Set-Service -Name sshd -StartupType Automatic
-      Start-Service sshd
+      # Wait for network connectivity before OpenSSH install (DHCP + DNS can take time during OOBE)
+      Write-Host "Waiting for network connectivity..."
+      \$netReady = \$false
+      for (\$i = 0; \$i -lt 30; \$i++) {
+        \$addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+          Where-Object { \$_.IPAddress -ne '127.0.0.1' -and \$_.PrefixOrigin -ne 'WellKnown' }
+        if (\$addrs) {
+          Write-Host "IPv4 address acquired: \$(\$addrs[0].IPAddress) on \$(\$addrs[0].InterfaceAlias)"
+          try {
+            [System.Net.Dns]::GetHostAddresses('github.com') | Out-Null
+            Write-Host "DNS resolution verified"
+            \$netReady = \$true
+            break
+          } catch {
+            Write-Host "  DNS not ready yet (attempt \$i)..."
+          }
+        } else {
+          Write-Host "  No IPv4 address yet (attempt \$i)..."
+        }
+        Start-Sleep -Seconds 5
+      }
+      if (-not \$netReady) {
+        Write-Host "WARNING: Network not fully ready after 150s -- OpenSSH online methods may fail"
+      }
 
-      # Disable Windows Firewall entirely
-      Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+      # Install OpenSSH server with fallback methods
+      try {
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -LimitAccess -ErrorAction Stop
+        Write-Host "OpenSSH installed via local capability store (-LimitAccess)"
+      } catch {
+        Write-Host "OpenSSH local install (-LimitAccess) failed: \$(\$_). Trying online method (300s timeout)..."
+        try {
+          \$job = Start-Job { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop }
+          if (-not (Wait-Job \$job -Timeout 300)) {
+            Stop-Job \$job; Remove-Job \$job -Force
+            throw "Add-WindowsCapability online timed out after 300s"
+          }
+          Receive-Job \$job -ErrorAction Stop; Remove-Job \$job
+          Write-Host "OpenSSH installed via Windows Update (online)"
+        } catch {
+          Write-Host "OpenSSH online install failed: \$(\$_). Trying GitHub MSI fallback..."
+          try {
+            # Win32-OpenSSH stable releases only ship .zip archives; MSI installers are Preview-only.
+            # When updating, change both the URL and expectedHash together.
+            # Hash: SHA-256 of the official GitHub release artifact.
+            # Verify with: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash
+            \$url = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi'
+            \$expectedHash = 'ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9'
+            \$msi = "\$env:TEMP\\OpenSSH-Win64.msi"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+            Invoke-WebRequest -Uri \$url -OutFile \$msi -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+            \$actualHash = (Get-FileHash \$msi -Algorithm SHA256).Hash.ToLower()
+            if (\$actualHash -ne \$expectedHash) {
+              throw "OpenSSH MSI hash mismatch (expected \$expectedHash, got \$actualHash)"
+            }
+            \$msiProc = Start-Process msiexec -Wait -PassThru -ArgumentList "/i \$msi /qn /norestart"
+            if (\$msiProc.ExitCode -ne 0 -and \$msiProc.ExitCode -ne 3010) {
+              throw "OpenSSH MSI installer failed with exit code \$(\$msiProc.ExitCode)"
+            }
+            Write-Host "OpenSSH installed via GitHub MSI (exit code: \$(\$msiProc.ExitCode))"
+          } catch {
+            throw "FATAL: All OpenSSH installation methods failed. Last error: \$(\$_)"
+          }
+        }
+      }
 
-      \$ErrorActionPreference = 'Continue'
+      Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
+      Start-Service sshd -ErrorAction Stop
+      \$sshdStatus = (Get-Service sshd).Status
+      if (\$sshdStatus -ne 'Running') {
+        throw "FATAL: sshd service is not running (status: \$sshdStatus)"
+      }
+      Write-Host "OpenSSH sshd service is running and set to auto-start"
+      \$sshInstalled = \$true
+
 
       # Suppress network location wizard and set profile
       New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff" -Force | Out-Null
@@ -448,7 +666,10 @@ data:
       # Disable Windows Update to prevent it from blocking shutdown
       Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
       Set-Service wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
-      # Always shut down, even if errors occurred above
+      if (-not \$sshInstalled) {
+        Write-Host "ERROR: post-update.ps1 finished WITHOUT OpenSSH installed"
+      }
+      Stop-Transcript -ErrorAction SilentlyContinue
       Stop-Computer -Force
     }
 EOF
@@ -635,10 +856,24 @@ if [ "${DS_READY}" != "True" ]; then
   exit 1
 fi
 
-# Cleanup pipeline resources (SA, autounattend CM)
-trap - EXIT
+# Cleanup pipeline resources (SA, autounattend CM) — these are safe to remove
+# before verification since they're only needed during the pipeline run.
 cleanup_pipeline_sa
 cleanup_autounattend_cm
+
+echo ""
+echo "=== Verifying Golden Image ==="
+# Run verify while EXIT trap is still armed so dump_windows_debug_info fires on failure.
+if ! verify_ssh_on_golden_image; then
+  echo ""
+  echo "FATAL: Golden image SSH verification failed."
+  echo "Check C:\\post-update.log inside the golden image for the actual cause"
+  echo "(guest agent install, OpenSSH install, or other setup failure)."
+  exit 1
+fi
+
+# Image verified — clear trap and do final cleanup
+trap - EXIT
 
 echo ""
 echo "=== Windows Server 2022 Golden Image Setup Complete ==="

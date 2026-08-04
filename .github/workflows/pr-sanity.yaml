@@ -25,3 +25,6 @@ jobs:
 
       - name: Do sanity checks
         run: make build
+
+      - name: Check Windows ConfigMap sync
+        run: bash scripts/check-ps1-sync.sh
