@@ -330,7 +330,7 @@ spec:
       - name: name
         value: windows-efi-installer
       - name: version
-        value: ">=v4.21.0"
+        value: "v4.21.0"
   params:
     - name: winImageDownloadURL
       # EDIT: Windows ISO URL. Default is Microsoft evaluation ISO.
