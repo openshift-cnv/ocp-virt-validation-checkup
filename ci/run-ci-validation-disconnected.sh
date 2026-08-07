@@ -11,9 +11,23 @@ PULL_SECRET="${PULL_SECRET:-}"
 DRY_RUN="${DRY_RUN:-true}"
 OCP_VIRT_VALIDATION_TIMEOUT="${OCP_VIRT_VALIDATION_TIMEOUT:-10m}"
 ACCEPT_WINDOWS_EULA="${ACCEPT_WINDOWS_EULA:-false}"
+CLEANUP_MIRRORS="${CLEANUP_MIRRORS:-false}"
+
+cleanup_mirror_resources() {
+  oc delete imagetagmirrorset ocp-virt-validation-mirrors --ignore-not-found=true || true
+  oc delete imagedigestmirrorset ocp-virt-validation-digest-mirrors --ignore-not-found=true || true
+  oc delete namespace kubevirt-mirror --ignore-not-found=true --wait=true --timeout=5m || true
+}
 
 cleanup() {
   rm -f "${CLUSTER_PULL_SECRET:-}" 2>/dev/null || true
+  if [ "${CLEANUP_MIRRORS}" = "true" ]; then
+    echo "=== Cleaning up mirror sets (CLEANUP_MIRRORS=true) ==="
+    cleanup_mirror_resources
+    echo "Waiting for MachineConfigPools to stabilize..."
+    oc wait machineconfigpool --all --for=condition=Updated --timeout=30m || true
+    echo "> Mirror cleanup complete"
+  fi
 }
 trap cleanup EXIT
 
@@ -34,9 +48,7 @@ echo "> Pre-flight checks passed"
 
 echo "=== Cleaning up previous runs ==="
 for node in $(oc get node -o NAME); do oc debug -n default "${node}" -- chroot /host crictl rmi --prune; done || true
-oc delete imagetagmirrorset ocp-virt-validation-mirrors --ignore-not-found=true || true
-oc delete imagedigestmirrorset ocp-virt-validation-digest-mirrors --ignore-not-found=true || true
-oc delete namespace kubevirt-mirror --ignore-not-found=true --wait=true || true
+cleanup_mirror_resources
 oc delete namespace ocp-virt-validation --ignore-not-found=true --wait=true || true
 echo "Waiting for MachineConfigPools to stabilize..."
 oc wait machineconfigpool --all --for=condition=Updated --timeout=30m
@@ -90,6 +102,69 @@ if [ -n "${OCP_VIRT_VALIDATION_IMAGE:-}" ]; then
   OCP_VIRT_VALIDATION_IMAGE=$("${SCRIPT_DIR}/mirror-checkup-image-to-internal-registry.sh" \
     "${OCP_VIRT_VALIDATION_IMAGE}" "${INTERNAL_REGISTRY}")
   echo "> Using in-cluster image: ${OCP_VIRT_VALIDATION_IMAGE}"
+fi
+
+if [ "${ACCEPT_WINDOWS_EULA}" = "true" ]; then
+  echo "=== Preparing disconnected Windows test ==="
+  GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
+
+  # Pre-create the namespace so resources are ready before the Tekton pipeline
+  # launches inside the checkup pod. setup-golden-image.sh reuses it when
+  # it finds the app=ocp-virt-validation label.
+  if ! oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
+    oc create namespace "${GOLDEN_IMAGE_NAMESPACE}"
+    oc label namespace "${GOLDEN_IMAGE_NAMESPACE}" \
+      app=ocp-virt-validation \
+      pod-security.kubernetes.io/enforce=privileged \
+      --overwrite
+  fi
+
+  echo "=== Mirroring Windows ISO to internal cluster server ==="
+  WIN_IMAGE_DOWNLOAD_URL=$(GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE}" \
+    "${SCRIPT_DIR}/setup-windows-iso-mirror.sh")
+  export WIN_IMAGE_DOWNLOAD_URL
+  echo "> Windows ISO URL: ${WIN_IMAGE_DOWNLOAD_URL}"
+
+  echo "=== Blocking Microsoft Update egress for disconnected Windows test ==="
+  oc apply -n "${GOLDEN_IMAGE_NAMESPACE}" -f - <<'EFEOF'
+apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
+metadata:
+  name: default
+  labels:
+    app: ocp-virt-validation
+spec:
+  egress:
+  - type: Deny
+    to:
+      dnsName: software-static.download.prss.microsoft.com
+  - type: Deny
+    to:
+      dnsName: windowsupdate.microsoft.com
+  - type: Deny
+    to:
+      dnsName: download.windowsupdate.com
+  - type: Deny
+    to:
+      dnsName: update.microsoft.com
+  - type: Deny
+    to:
+      dnsName: fe2cr.update.microsoft.com
+  - type: Deny
+    to:
+      dnsName: sls.update.microsoft.com
+  - type: Deny
+    to:
+      dnsName: github.com
+  - type: Deny
+    to:
+      dnsName: objects.githubusercontent.com
+  - type: Allow
+    to:
+      cidrSelector: 0.0.0.0/0
+EFEOF
+
+  echo "> EgressFirewall applied to namespace ${GOLDEN_IMAGE_NAMESPACE}"
 fi
 
 echo "=== Running disconnected validation checkup ==="
