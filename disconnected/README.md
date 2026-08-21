@@ -348,75 +348,39 @@ The script will:
 
 ## Windows Testing in Disconnected Environments
 
-Windows testing requires additional setup in disconnected environments because the `windows-efi-installer` Tekton pipeline normally uses the hub resolver to fetch the pipeline and tasks from Artifact Hub, which requires internet access.
+The automated Windows golden image creation (`ACCEPT_WINDOWS_EULA=true`) requires internet access to download the Windows ISO and fetch the Tekton pipeline from Artifact Hub. It is **not supported** in disconnected environments.
 
-**Recommended:** Apply `manifests/windows/golden-image.yaml` once. Pre-install the Tekton pipeline (see Step 2 below), set `winImageDownloadURL` to your internal ISO mirror in the manifest, and wait for the pipeline to finish. Then run the checkup **without** `ACCEPT_WINDOWS_EULA` — the tool detects the existing DataSource and skips the pipeline entirely, avoiding repeated downloads and rebuilds.
+To run Windows tests on a disconnected cluster, provide your own pre-built golden image (BYOI):
 
-The steps below describe the **alternative (ephemeral)** path using `ACCEPT_WINDOWS_EULA=true`, which rebuilds the golden image on every run.
+### Requirements
 
-### Prerequisites for Disconnected Windows Testing
+Your Windows image must have:
+- **OpenSSH server** installed and set to start automatically (port 22)
+- **QEMU guest agent** installed
+- **Administrator** account with password `Administrator`
+- **Windows Firewall** disabled
 
-1. **OpenShift Pipelines operator** installed on the cluster
-2. **Windows Server 2022 ISO** available on an accessible internal server
-3. **Tekton pipeline and tasks** pre-installed manually
+### Setup
 
-### Step 1: Download the Windows Server 2022 ISO
+1. Prepare a Windows Server 2022 image with the requirements above (using your own tooling, ISO, or existing image).
 
-Download the Windows Server 2022 evaluation ISO from Microsoft on a connected machine and host it on an internal HTTP server accessible from the cluster:
-
-```bash
-# On connected machine
-curl -L -o SERVER_EVAL_x64FRE_en-us.iso "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
-
-# Copy to your internal HTTP server
-scp SERVER_EVAL_x64FRE_en-us.iso user@internal-server:/var/www/html/images/
-```
-
-### Step 2: Pre-install the Tekton Pipeline
-
-Since the hub resolver cannot fetch from Artifact Hub in disconnected environments, you must manually install the `windows-efi-installer` pipeline and its tasks.
-
-Download the pipeline manifests from a connected machine:
-```bash
-# On connected machine
-curl -L -o windows-efi-installer.yaml \
-  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/pipelines/windows-efi-installer/windows-efi-installer.yaml"
-
-curl -L -o windows-efi-installer-tasks.yaml \
-  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/tasks/windows-efi-installer/windows-efi-installer-tasks.yaml"
-
-curl -L -o windows-efi-installer-configmaps.yaml \
-  "https://raw.githubusercontent.com/kubevirt/kubevirt-tekton-tasks/main/release/pipelines/windows-efi-installer/configmaps/windows-efi-installer-configmaps.yaml"
-```
-
-Transfer and apply to the disconnected cluster:
+2. Create the namespace with the required Pod Security label:
 ```bash
 oc create namespace validation-os-images
-oc label namespace validation-os-images app=ocp-virt-validation
 oc label namespace validation-os-images pod-security.kubernetes.io/enforce=privileged
-oc apply -f windows-efi-installer-tasks.yaml -n validation-os-images
-oc apply -f windows-efi-installer-configmaps.yaml -n validation-os-images
-oc apply -f windows-efi-installer.yaml -n validation-os-images
 ```
 
-Alternatively, get the manifests from Artifact Hub:
-- https://artifacthub.io/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer
-
-### Step 3: Run the Checkup with Custom Windows ISO URL
-
-When running the validation checkup, specify your internal Windows ISO URL:
-
+3. Edit `manifests/windows/golden-image.yaml`: comment out the Method 1 (Tekton pipeline) section and uncomment the Method 2 DataVolume section. Set the source to your image location — the manifest documents all supported import options (HTTP URL, container registry, PVC clone, or `virtctl image-upload`). Then apply it:
 ```bash
-$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
-    -e ACCEPT_WINDOWS_EULA=true \
-    -e STORAGE_CLASS=<your-storage-class> \
-    -e WIN_IMAGE_DOWNLOAD_URL="http://internal-server.example.com/images/SERVER_EVAL_x64FRE_en-us.iso" \
-    ${OCP_VIRT_VALIDATION_IMAGE} generate
+oc apply -f manifests/windows/golden-image.yaml
 ```
 
-### Notes for Disconnected Windows Testing
+4. Verify the DataSource is Ready:
+```bash
+oc get datasource win2k22 -n validation-os-images -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+# Should print: True
+```
 
-- The pipeline output PVC backs a `win2k22` DataSource in a custom `validation-os-images` namespace created by the tool -- no intermediate VMs or snapshots
-- The image creation takes approximately 1-2 hours on first run (up to 3 hours on slow networks)
-- With `ACCEPT_WINDOWS_EULA=true`, each run rebuilds the golden image from scratch and cleans up on completion
-- If the hub resolver fails (due to no internet), the checkup will provide instructions for manual pipeline installation
+6. Run the validation tool **without** `ACCEPT_WINDOWS_EULA`. The tool detects the existing DataSource and runs Windows tests automatically.
+
+**Important:** Do **not** set `ACCEPT_WINDOWS_EULA=true` on disconnected clusters. The tool-managed path requires internet access; it detects the missing hub resolver and skips Windows tests gracefully, but other pipeline failures (ISO download, timeout, SSH verification) will abort the entire validation run.
