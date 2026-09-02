@@ -49,6 +49,17 @@ INSTANCE_TYPE="${WIN_INSTANCE_TYPE:-${DEFAULT_INSTANCE_TYPE}}"
 
 AUTOUNATTEND_CM_NAME="${GOLDEN_IMAGE_NAME}-autounattend"
 
+# OpenSSH MSI file server (serves the MSI over HTTP inside the cluster so the
+# Windows VM doesn't need external HTTPS connectivity during first boot).
+OPENSSH_MSI_URL="https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi"
+OPENSSH_MSI_FILENAME="OpenSSH-Win64-v10.0.0.0.msi"
+# MSI installers are Preview-only (stable releases ship .zip archives only).
+# To update: download the new MSI, run (Get-FileHash <file> -Algorithm SHA256).Hash.ToLower(),
+# then update OPENSSH_MSI_URL, OPENSSH_MSI_FILENAME and OPENSSH_MSI_HASH here AND
+# the matching literals in manifests/windows/golden-image.yaml atomically.
+OPENSSH_MSI_HASH="ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9"
+OPENSSH_MSI_SERVER_NAME="openssh-msi-server"
+
 # --- Helper Functions ---
 
 cleanup_pipeline_sa() {
@@ -80,6 +91,171 @@ cleanup_autounattend_cm() {
 
 cleanup_namespace() {
   cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+}
+
+# Deletes MSI server resources we created. Requires either CREATED_MSI_SERVER=true
+# (this run) or "force" (drop leftovers from a previous run in a tool-managed ns).
+# Never deletes unlabeled / customer-owned resources.
+cleanup_msi_server() {
+  if [ "${CREATED_MSI_SERVER}" != "true" ] && [ "${1:-}" != "force" ]; then
+    return
+  fi
+  local ns_label
+  ns_label=$(oc get namespace "${GOLDEN_IMAGE_NAMESPACE}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || echo "")
+  if [ "${ns_label}" != "ocp-virt-validation" ]; then
+    return
+  fi
+  local label
+  label=$(oc get pod "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || echo "")
+  if [ "${label}" == "ocp-virt-validation" ]; then
+    oc delete pod "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s 2>/dev/null || true
+  fi
+  label=$(oc get service "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || echo "")
+  if [ "${label}" == "ocp-virt-validation" ]; then
+    oc delete service "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+  fi
+  label=$(oc get serviceaccount "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || echo "")
+  if [ "${label}" == "ocp-virt-validation" ]; then
+    oc adm policy remove-scc-from-user anyuid -z "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
+    oc delete serviceaccount "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+  fi
+}
+
+start_msi_file_server() {
+  local svc_url="http://${OPENSSH_MSI_SERVER_NAME}.${GOLDEN_IMAGE_NAMESPACE}.svc.cluster.local:8080/${OPENSSH_MSI_FILENAME}"
+  echo "Starting in-cluster MSI file server (${svc_url})..."
+
+  cleanup_msi_server force
+
+  # Dedicated SA with anyuid only (UID 1001). No edit role, no API token in the pod.
+  echo "Creating MSI file server service account..."
+  if ! oc create serviceaccount "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}"; then
+    echo "ERROR: Failed to create MSI file server service account"
+    return 1
+  fi
+  # Label before setting CREATED_MSI_SERVER. This function runs under `if !`, so
+  # set -e is off — an unchecked label failure would leave an unlabeled SA that
+  # cleanup skips, blocking the next run from recreating it.
+  if ! oc label serviceaccount "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" app=ocp-virt-validation --overwrite; then
+    echo "ERROR: Failed to label MSI file server service account"
+    oc delete serviceaccount "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found || true
+    return 1
+  fi
+  CREATED_MSI_SERVER=true
+  if ! oc adm policy add-scc-to-user anyuid -z "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}"; then
+    echo "ERROR: Failed to grant anyuid SCC to MSI file server service account"
+    return 1
+  fi
+
+  # The initContainer downloads the MSI from GitHub over HTTPS. This works because the
+  # WinHTTP/TLS issue only affects Windows during OOBE — Linux containers have no problem.
+  if ! oc apply -n "${GOLDEN_IMAGE_NAMESPACE}" -f - <<MSIEOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${OPENSSH_MSI_SERVER_NAME}
+  labels:
+    app: ocp-virt-validation
+    openssh-msi-server: "true"
+spec:
+  restartPolicy: Always
+  serviceAccountName: ${OPENSSH_MSI_SERVER_NAME}
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+  initContainers:
+  - name: download
+    image: registry.access.redhat.com/ubi9/ubi
+    command:
+    - sh
+    - -c
+    - |
+      set -e
+      curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --max-time 120 -o /data/${OPENSSH_MSI_FILENAME} ${OPENSSH_MSI_URL}
+      actual=\$(sha256sum /data/${OPENSSH_MSI_FILENAME} | awk '{print \$1}')
+      if [ "\$actual" != "${OPENSSH_MSI_HASH}" ]; then
+        echo "MSI hash mismatch: \$actual"
+        exit 1
+      fi
+      echo "Downloaded \$(stat -c%s /data/${OPENSSH_MSI_FILENAME}) bytes"
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  containers:
+  - name: server
+    image: registry.access.redhat.com/ubi9/ubi
+    command: ['python3', '-m', 'http.server', '8080', '--directory', '/data']
+    ports:
+    - containerPort: 8080
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      requests:
+        memory: 32Mi
+        cpu: 10m
+      limits:
+        memory: 64Mi
+        cpu: 100m
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    emptyDir: {}
+MSIEOF
+  then
+    echo "ERROR: Failed to create MSI file server Pod"
+    return 1
+  fi
+
+  if ! oc apply -n "${GOLDEN_IMAGE_NAMESPACE}" -f - <<SVCEOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${OPENSSH_MSI_SERVER_NAME}
+  labels:
+    app: ocp-virt-validation
+    openssh-msi-server: "true"
+spec:
+  selector:
+    openssh-msi-server: "true"
+  ports:
+  - port: 8080
+    targetPort: 8080
+SVCEOF
+  then
+    echo "ERROR: Failed to create MSI file server Service"
+    return 1
+  fi
+
+  echo "Waiting for MSI file server to be ready..."
+  if ! oc wait --for=condition=Ready "pod/${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --timeout=1200s; then
+    echo "ERROR: MSI file server did not become ready in 1200s"
+    oc logs "${OPENSSH_MSI_SERVER_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --all-containers 2>/dev/null || true
+    return 1
+  fi
+  echo "MSI file server is ready (serving at ${svc_url})"
 }
 
 verify_ssh_on_golden_image() {
@@ -127,6 +303,8 @@ spec:
   dataVolumeTemplates:
     - metadata:
         name: ${test_dv_name}
+        annotations:
+          cdi.kubevirt.io/cloneType: "copy"
       spec:
         sourceRef:
           kind: DataSource
@@ -134,10 +312,39 @@ spec:
           namespace: ${GOLDEN_IMAGE_NAMESPACE}
         storage:
           storageClassName: ${STORAGE_CLASS}
+          accessModes: ["ReadWriteOnce"]
           resources:
             requests:
               storage: 20Gi
 VMEOF
+
+  local dv_timeout=1200
+  local dv_elapsed=0
+  local dv_phase=""
+  echo "Waiting for DataVolume '${test_dv_name}' to be ready (up to ${dv_timeout}s)..."
+  while true; do
+    dv_phase=$(oc get dv "${test_dv_name}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+    if [ "${dv_phase}" == "Succeeded" ]; then
+      echo "DataVolume ready after ${dv_elapsed}s"
+      break
+    fi
+    if [ "${dv_phase}" == "Failed" ]; then
+      echo "ERROR: DataVolume '${test_dv_name}' entered terminal failure phase: ${dv_phase}"
+      oc describe dv "${test_dv_name}" -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
+      return 1
+    fi
+    if [ ${dv_elapsed} -ge ${dv_timeout} ]; then
+      echo "ERROR: DataVolume '${test_dv_name}' did not become ready within ${dv_timeout}s (phase: ${dv_phase})"
+      oc describe dv "${test_dv_name}" -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
+      return 1
+    fi
+    sleep 15
+    dv_elapsed=$((dv_elapsed + 15))
+    if [ $((dv_elapsed % 60)) -eq 0 ]; then
+      echo "DataVolume phase: ${dv_phase} (${dv_elapsed}/${dv_timeout}s elapsed)"
+    fi
+  done
 
   local verify_timeout=600
   local elapsed=0
@@ -256,6 +463,11 @@ run_pipeline() {
   echo "Using storage class: ${STORAGE_CLASS}"
   echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
   echo "Using instance type: ${INSTANCE_TYPE}"
+
+  if ! start_msi_file_server; then
+    echo "FATAL: MSI file server failed to start — cannot proceed"
+    exit 1
+  fi
 
   create_autounattend_configmap
 
@@ -597,26 +809,54 @@ data:
           Receive-Job \$job -ErrorAction Stop; Remove-Job \$job
           Write-Host "OpenSSH installed via Windows Update (online)"
         } catch {
-          Write-Host "OpenSSH online install failed: \$(\$_). Trying GitHub MSI fallback..."
+          Write-Host "OpenSSH online install failed: \$(\$_). Trying MSI download fallback..."
           try {
-            # Win32-OpenSSH stable releases only ship .zip archives; MSI installers are Preview-only.
-            # When updating, change both the URL and expectedHash together.
-            # Hash: SHA-256 of the official GitHub release artifact.
-            # Verify with: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash
-            \$url = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi'
-            \$expectedHash = 'ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9'
-            \$msi = "\$env:TEMP\\OpenSSH-Win64.msi"
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-            Invoke-WebRequest -Uri \$url -OutFile \$msi -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
-            \$actualHash = (Get-FileHash \$msi -Algorithm SHA256).Hash.ToLower()
-            if (\$actualHash -ne \$expectedHash) {
-              throw "OpenSSH MSI hash mismatch (expected \$expectedHash, got \$actualHash)"
+            \$msi = "\$env:TEMP\\${OPENSSH_MSI_FILENAME}"
+            \$downloaded = \$false
+            # MSI installers are Preview-only (stable releases ship .zip archives only).
+            # When updating, change the cluster/GitHub MSI URLs and \$expectedHash atomically.
+            # Verify: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash.ToLower()
+            \$expectedHash = '${OPENSSH_MSI_HASH}'
+            # Try in-cluster file server first (plain HTTP, avoids WinHTTP/TLS issues during first boot).
+            \$clusterUrl = 'http://${OPENSSH_MSI_SERVER_NAME}.${GOLDEN_IMAGE_NAMESPACE}.svc.cluster.local:8080/${OPENSSH_MSI_FILENAME}'
+            Write-Host "Trying in-cluster MSI server: \$clusterUrl"
+            \$curlArgs = @('-L', '--fail', '-o', \$msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', \$clusterUrl)
+            \$curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList \$curlArgs -Wait -PassThru -NoNewWindow
+            if (\$curlProc.ExitCode -eq 0) {
+              \$actualHash = (Get-FileHash \$msi -Algorithm SHA256).Hash.ToLower()
+              if (\$actualHash -ne \$expectedHash) {
+                Write-Host "In-cluster MSI hash mismatch (got \$actualHash). Trying GitHub..."
+                Remove-Item \$msi -Force -ErrorAction SilentlyContinue
+              } else {
+                Write-Host "Downloaded MSI from in-cluster server (hash verified)"
+                \$downloaded = \$true
+              }
+            } else {
+              Write-Host "In-cluster download failed (curl exit \$(\$curlProc.ExitCode)). Falling back to GitHub via curl.exe..."
             }
-            \$msiProc = Start-Process msiexec -Wait -PassThru -ArgumentList "/i \$msi /qn /norestart"
-            if (\$msiProc.ExitCode -ne 0 -and \$msiProc.ExitCode -ne 3010) {
-              throw "OpenSSH MSI installer failed with exit code \$(\$msiProc.ExitCode)"
+            if (-not \$downloaded) {
+              \$extUrl = '${OPENSSH_MSI_URL}'
+              \$curlArgs = @('-L', '--fail', '-o', \$msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', \$extUrl)
+              \$curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList \$curlArgs -Wait -PassThru -NoNewWindow
+              if (\$curlProc.ExitCode -ne 0) {
+                throw "curl.exe download failed with exit code \$(\$curlProc.ExitCode)"
+              }
+              \$actualHash = (Get-FileHash \$msi -Algorithm SHA256).Hash.ToLower()
+              if (\$actualHash -ne \$expectedHash) {
+                throw "GitHub MSI hash mismatch (got \$actualHash, expected \$expectedHash)"
+              }
+              Write-Host "Downloaded MSI from GitHub via curl.exe (hash verified)"
             }
-            Write-Host "OpenSSH installed via GitHub MSI (exit code: \$(\$msiProc.ExitCode))"
+            \$msiProc = Start-Process msiexec -PassThru -ArgumentList @('/i', \$msi, '/qn', '/norestart')
+            if (-not \$msiProc.WaitForExit(120000)) {
+              taskkill.exe /PID \$msiProc.Id /T /F | Out-Null
+              throw "OpenSSH MSI installer timed out after 120s"
+            }
+            \$msiExit = \$msiProc.ExitCode
+            if (\$msiExit -ne 0 -and \$msiExit -ne 3010) {
+              throw "OpenSSH MSI installer failed with exit code \$msiExit"
+            }
+            Write-Host "OpenSSH installed via MSI (exit code: \$msiExit)"
           } catch {
             throw "FATAL: All OpenSSH installation methods failed. Last error: \$(\$_)"
           }
@@ -714,7 +954,8 @@ echo "Microsoft EULA accepted by user"
 # Set trap early so dump_windows_debug_info fires for real failures.
 # Exit ${EXIT_WINDOWS_SKIP} (prerequisite missing) is a routine skip — skip the dump.
 CREATED_PIPELINE_SA=false
-trap 'exit_code=$?; [ $exit_code -ne 0 ] && [ $exit_code -ne '"${EXIT_WINDOWS_SKIP}"' ] && dump_windows_debug_info; cleanup_pipeline_sa; cleanup_autounattend_cm; if [ $exit_code -ne 0 ]; then cleanup_namespace; fi' EXIT
+CREATED_MSI_SERVER=false
+trap 'exit_code=$?; [ $exit_code -ne 0 ] && [ $exit_code -ne '"${EXIT_WINDOWS_SKIP}"' ] && dump_windows_debug_info; cleanup_pipeline_sa; cleanup_autounattend_cm; cleanup_msi_server; if [ $exit_code -ne 0 ]; then cleanup_namespace; fi' EXIT
 
 echo "Checking if OpenShift Pipelines operator is installed..."
 if ! oc get crd pipelines.tekton.dev &>/dev/null; then
@@ -856,10 +1097,11 @@ if [ "${DS_READY}" != "True" ]; then
   exit 1
 fi
 
-# Cleanup pipeline resources (SA, autounattend CM) — these are safe to remove
+# Cleanup pipeline resources (SA, autounattend CM, MSI server) — these are safe to remove
 # before verification since they're only needed during the pipeline run.
 cleanup_pipeline_sa
 cleanup_autounattend_cm
+cleanup_msi_server
 
 echo ""
 echo "=== Verifying Golden Image ==="
@@ -867,8 +1109,6 @@ echo "=== Verifying Golden Image ==="
 if ! verify_ssh_on_golden_image; then
   echo ""
   echo "FATAL: Golden image SSH verification failed."
-  echo "Check C:\\post-update.log inside the golden image for the actual cause"
-  echo "(guest agent install, OpenSSH install, or other setup failure)."
   exit 1
 fi
 

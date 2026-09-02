@@ -356,6 +356,8 @@ cleanup_golden_image_resources() {
     oc delete rolebinding -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
     oc delete role -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
     oc delete sa -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete pod -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
+    oc delete service -l app=ocp-virt-validation -n "${ns}" 2>/dev/null || true
   else
     return 0
   fi

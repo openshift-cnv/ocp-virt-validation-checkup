@@ -334,26 +334,54 @@ data:
           Receive-Job $job -ErrorAction Stop; Remove-Job $job
           Write-Host "OpenSSH installed via Windows Update (online)"
         } catch {
-          Write-Host "OpenSSH online install failed: $($_). Trying GitHub MSI fallback..."
+          Write-Host "OpenSSH online install failed: $($_). Trying MSI download fallback..."
           try {
-            # Win32-OpenSSH stable releases only ship .zip archives; MSI installers are Preview-only.
-            # When updating, change both the URL and expectedHash together.
-            # Hash: SHA-256 of the official GitHub release artifact.
-            # Verify with: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash
-            $url = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi'
+            $msi = "$env:TEMP\OpenSSH-Win64-v10.0.0.0.msi"
+            $downloaded = $false
+            # MSI installers are Preview-only (stable releases ship .zip archives only).
+            # When updating, change the cluster/GitHub MSI URLs and $expectedHash atomically.
+            # Verify: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash.ToLower()
             $expectedHash = 'ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9'
-            $msi = "$env:TEMP\OpenSSH-Win64.msi"
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-            Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
-            $actualHash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
-            if ($actualHash -ne $expectedHash) {
-              throw "OpenSSH MSI hash mismatch (expected $expectedHash, got $actualHash)"
+            # Try in-cluster file server first (plain HTTP, avoids WinHTTP/TLS issues during first boot).
+            $clusterUrl = 'http://openssh-msi-server.validation-os-images.svc.cluster.local:8080/OpenSSH-Win64-v10.0.0.0.msi'
+            Write-Host "Trying in-cluster MSI server: $clusterUrl"
+            $curlArgs = @('-L', '--fail', '-o', $msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', $clusterUrl)
+            $curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+            if ($curlProc.ExitCode -eq 0) {
+              $actualHash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+              if ($actualHash -ne $expectedHash) {
+                Write-Host "In-cluster MSI hash mismatch (got $actualHash). Trying GitHub..."
+                Remove-Item $msi -Force -ErrorAction SilentlyContinue
+              } else {
+                Write-Host "Downloaded MSI from in-cluster server (hash verified)"
+                $downloaded = $true
+              }
+            } else {
+              Write-Host "In-cluster download failed (curl exit $($curlProc.ExitCode)). Falling back to GitHub via curl.exe..."
             }
-            $msiProc = Start-Process msiexec -Wait -PassThru -ArgumentList "/i $msi /qn /norestart"
-            if ($msiProc.ExitCode -ne 0 -and $msiProc.ExitCode -ne 3010) {
-              throw "OpenSSH MSI installer failed with exit code $($msiProc.ExitCode)"
+            if (-not $downloaded) {
+              $extUrl = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi'
+              $curlArgs = @('-L', '--fail', '-o', $msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', $extUrl)
+              $curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+              if ($curlProc.ExitCode -ne 0) {
+                throw "curl.exe download failed with exit code $($curlProc.ExitCode)"
+              }
+              $actualHash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+              if ($actualHash -ne $expectedHash) {
+                throw "GitHub MSI hash mismatch (got $actualHash, expected $expectedHash)"
+              }
+              Write-Host "Downloaded MSI from GitHub via curl.exe (hash verified)"
             }
-            Write-Host "OpenSSH installed via GitHub MSI (exit code: $($msiProc.ExitCode))"
+            $msiProc = Start-Process msiexec -PassThru -ArgumentList @('/i', $msi, '/qn', '/norestart')
+            if (-not $msiProc.WaitForExit(120000)) {
+              taskkill.exe /PID $msiProc.Id /T /F | Out-Null
+              throw "OpenSSH MSI installer timed out after 120s"
+            }
+            $msiExit = $msiProc.ExitCode
+            if ($msiExit -ne 0 -and $msiExit -ne 3010) {
+              throw "OpenSSH MSI installer failed with exit code $msiExit"
+            }
+            Write-Host "OpenSSH installed via MSI (exit code: $msiExit)"
           } catch {
             throw "FATAL: All OpenSSH installation methods failed. Last error: $($_)"
           }
