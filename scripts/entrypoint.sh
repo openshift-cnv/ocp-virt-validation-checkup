@@ -223,7 +223,7 @@ cleanup_and_forward_signal() {
 # Set trap to cleanup and forward signals
 trap cleanup_and_forward_signal INT TERM
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
+ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2|virt-cluster-validate"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
   echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
@@ -510,6 +510,20 @@ if suite_enabled "tier2"; then
   echo "Tier-2 test suite has finished."
 else
   echo "Tier-2 test suite has been skipped."
+fi
+
+# =====================
+# virt-cluster-validate
+# =====================
+if suite_enabled "virt-cluster-validate"; then
+  echo "Running virt-cluster-validate suite..."
+  ${SCRIPT_DIR}/virt-cluster-validate/test-virt-cluster-validate.sh &
+  CURRENT_TEST_PID=$!
+  wait ${CURRENT_TEST_PID}
+  CURRENT_TEST_PID=""
+  echo "virt-cluster-validate suite has finished."
+else
+  echo "virt-cluster-validate suite has been skipped."
 fi
 
 

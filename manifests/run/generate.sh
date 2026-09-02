@@ -35,7 +35,7 @@ for suite in "${TEST_SUITES_ARRAY[@]}"; do
 done
 STORAGE_SIZE="${TOTAL_STORAGE}Gi"
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
+ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2|virt-cluster-validate"
 if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
   echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
   echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
