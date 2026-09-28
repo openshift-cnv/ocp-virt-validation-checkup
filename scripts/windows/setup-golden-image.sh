@@ -442,39 +442,16 @@ dump_windows_debug_info() {
   echo "=== End Debug Info ==="
 }
 
-run_pipeline() {
-  CREATED_PIPELINE_SA=false
-  echo "Ensuring pipeline service account exists..."
-  if ! oc get sa pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
-    echo "Creating pipeline service account..."
-    oc create serviceaccount pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
-    oc label serviceaccount pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" app=ocp-virt-validation --overwrite
-  fi
-  echo "Granting pipeline service account privileged SCC and edit role..."
-  oc adm policy add-scc-to-user privileged -z pipeline -n "${GOLDEN_IMAGE_NAMESPACE}"
-  CREATED_PIPELINE_SA=true
-  oc adm policy add-role-to-user edit -z pipeline -n "${GOLDEN_IMAGE_NAMESPACE}"
+# CouldntGetPipeline/CouldntGetTask is terminal for a PipelineRun; callers
+# delete and recreate via this helper.
+create_windows_pipelinerun() {
+  local output
+  local stderr
+  local exit_code
+  local temp_err
+  temp_err=$(mktemp)
 
-  if [ -z "${STORAGE_CLASS}" ]; then
-    echo "ERROR: STORAGE_CLASS is not set"
-    exit 1
-  fi
-
-  echo "Using storage class: ${STORAGE_CLASS}"
-  echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
-  echo "Using instance type: ${INSTANCE_TYPE}"
-
-  if ! start_msi_file_server; then
-    echo "FATAL: MSI file server failed to start — cannot proceed"
-    exit 1
-  fi
-
-  create_autounattend_configmap
-
-  echo ""
-  echo "=== Running Windows Server 2022 Installation Pipeline ==="
-
-  PIPELINE_RUN_NAME=$(oc create -n "${GOLDEN_IMAGE_NAMESPACE}" -o name -f - <<EOF | cut -d/ -f2
+  output=$(oc create -n "${GOLDEN_IMAGE_NAMESPACE}" -o name -f - 2>"$temp_err" <<EOF
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
@@ -521,45 +498,108 @@ spec:
           fsGroup: 107
           runAsUser: 107
 EOF
-  )
+)
+  exit_code=$?
+  stderr=$(cat "$temp_err" 2>/dev/null)
+  rm -f "$temp_err"
 
-  if [ -z "${PIPELINE_RUN_NAME}" ]; then
-    echo "ERROR: Failed to create PipelineRun or parse its name"
-    exit 1
+  if [ ${exit_code} -ne 0 ] || [ -z "${output}" ]; then
+    if [ -n "${stderr}" ]; then
+      echo "ERROR: Failed to create PipelineRun: ${stderr}" >&2
+    else
+      echo "ERROR: Failed to create PipelineRun" >&2
+    fi
+    return 1
   fi
 
-  echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
-  echo "Waiting for Windows installation to complete (this may take up to 3 hours)..."
+  echo "${output}" | cut -d/ -f2
+}
 
-  local TIMEOUT_SECONDS=10800
-  local POLL_INTERVAL=60
+# Query pipelinerun status with transient error handling
+# Returns 0 on success (status in stdout)
+# Returns 1 on failed query (Unknown — transient API error after retries)
+get_pipelinerun_status() {
+  local prn=$1
+  local max_retries=3
+  local retry=0
+  local backoff=2
+
+  while [ ${retry} -lt ${max_retries} ]; do
+    local status_output
+    local exit_code
+    status_output=$(oc get pipelinerun "${prn}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+      -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null)
+    exit_code=$?
+
+    if [ ${exit_code} -eq 0 ]; then
+      # Query succeeded; return the reason (even if empty — that's "Pending")
+      if [ -n "${status_output}" ]; then
+        echo "${status_output}"
+      else
+        echo "Pending"
+      fi
+      return 0
+    fi
+
+    retry=$((retry + 1))
+    if [ ${retry} -lt ${max_retries} ]; then
+      echo "WARNING: Transient API error querying PipelineRun (attempt ${retry}/${max_retries}), retrying in ${backoff}s..." >&2
+      sleep ${backoff}
+      backoff=$((backoff * 2))
+    fi
+  done
+
+  echo "Unknown"
+  return 1
+}
+
+wait_for_pipelinerun() {
+  local prn=$1
+  local max_attempts=$2
+  local timeout=$3
+  local attempt=$4
+
   local ELAPSED=0
+  local POLL_INTERVAL=60
+  local CONSECUTIVE_ERROR_DURATION=0
 
-  while [ ${ELAPSED} -lt ${TIMEOUT_SECONDS} ]; do
+  while [ ${ELAPSED} -lt ${timeout} ]; do
     local STATUS
-    STATUS=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
-      -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || echo "Unknown")
+    STATUS=$(get_pipelinerun_status "${prn}") || true
 
     case "${STATUS}" in
       "Succeeded")
         echo "Pipeline completed successfully!"
-        break
+        return 0
         ;;
       "CouldntGetPipeline"|"CouldntGetTask")
-        echo "ERROR: Failed to resolve pipeline/tasks from Artifact Hub (status: ${STATUS})."
-        echo "The Tekton hub resolver requires internet access."
-        echo "In disconnected environments, provide your own golden image (BYOI) instead of using ACCEPT_WINDOWS_EULA."
-        echo "See: disconnected/README.md"
-        exit ${EXIT_WINDOWS_SKIP}
+        echo "WARNING: Artifact Hub resolver failed (status: ${STATUS}) on attempt ${attempt}/${max_attempts}."
+        return 1
         ;;
       "Failed"|"PipelineRunTimeout"|"TaskRunCancelled")
         echo "ERROR: Pipeline failed with status: ${STATUS}"
-        oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o yaml | tail -50
-        exit 1
+        oc get pipelinerun "${prn}" -n "${GOLDEN_IMAGE_NAMESPACE}" -o yaml 2>/dev/null | tail -50
+        return 2
+        ;;
+      "Unknown")
+        CONSECUTIVE_ERROR_DURATION=$((CONSECUTIVE_ERROR_DURATION + POLL_INTERVAL))
+        echo "[${ELAPSED}s] Status: Unable to query (transient API error, ${CONSECUTIVE_ERROR_DURATION}s consecutive)"
+        if [ ${CONSECUTIVE_ERROR_DURATION} -gt 300 ]; then
+          echo "ERROR: Persistent API connectivity issue (${CONSECUTIVE_ERROR_DURATION}s of consecutive failures). Aborting."
+          return 3
+        fi
+        ;;
+      "Pending")
+        CONSECUTIVE_ERROR_DURATION=0
+        local CURRENT_TASK
+        CURRENT_TASK=$(oc get pipelinerun "${prn}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+          -o jsonpath='{.status.childReferences[-1].name}' 2>/dev/null || echo "starting")
+        echo "[${ELAPSED}s] Status: Pending (reason not yet set), Current: ${CURRENT_TASK}"
         ;;
       *)
+        CONSECUTIVE_ERROR_DURATION=0
         local CURRENT_TASK
-        CURRENT_TASK=$(oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+        CURRENT_TASK=$(oc get pipelinerun "${prn}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
           -o jsonpath='{.status.childReferences[-1].name}' 2>/dev/null || echo "starting")
         echo "[${ELAPSED}s] Status: ${STATUS}, Current: ${CURRENT_TASK}"
         ;;
@@ -569,10 +609,141 @@ EOF
     ELAPSED=$((ELAPSED + POLL_INTERVAL))
   done
 
-  if [ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]; then
-    echo "ERROR: Timeout waiting for Windows installation"
+  echo "ERROR: Timeout waiting for Windows installation (${timeout}s exceeded)"
+  return 4
+}
+
+run_pipeline() {
+  CREATED_PIPELINE_SA=false
+  echo "Ensuring pipeline service account exists..."
+  if ! oc get sa pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
+    echo "Creating pipeline service account..."
+    oc create serviceaccount pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" 2>/dev/null || true
+    oc label serviceaccount pipeline -n "${GOLDEN_IMAGE_NAMESPACE}" app=ocp-virt-validation --overwrite
+  fi
+  echo "Granting pipeline service account privileged SCC and edit role..."
+  oc adm policy add-scc-to-user privileged -z pipeline -n "${GOLDEN_IMAGE_NAMESPACE}"
+  CREATED_PIPELINE_SA=true
+  oc adm policy add-role-to-user edit -z pipeline -n "${GOLDEN_IMAGE_NAMESPACE}"
+
+  if [ -z "${STORAGE_CLASS}" ]; then
+    echo "ERROR: STORAGE_CLASS is not set"
     exit 1
   fi
+
+  echo "Using storage class: ${STORAGE_CLASS}"
+  echo "Using Windows ISO URL: ${WIN_IMAGE_URL}"
+  echo "Using instance type: ${INSTANCE_TYPE}"
+
+  if ! start_msi_file_server; then
+    echo "FATAL: MSI file server failed to start — cannot proceed"
+    exit 1
+  fi
+
+  create_autounattend_configmap
+
+  echo ""
+  echo "=== Running Windows Server 2022 Installation Pipeline ==="
+
+  local MAX_HUB_ATTEMPTS=3
+  local HUB_BACKOFF_SECONDS=30
+  local TIMEOUT_SECONDS=10800
+
+  local attempt
+  for attempt in $(seq 1 ${MAX_HUB_ATTEMPTS}); do
+    if ! PIPELINE_RUN_NAME=$(create_windows_pipelinerun); then
+      if [ "${attempt}" -lt "${MAX_HUB_ATTEMPTS}" ]; then
+        echo "Retrying PipelineRun creation in ${HUB_BACKOFF_SECONDS}s..."
+        sleep ${HUB_BACKOFF_SECONDS}
+        continue
+      fi
+      echo "ERROR: Failed to create PipelineRun after ${MAX_HUB_ATTEMPTS} attempts"
+      exit 1
+    fi
+
+    if [ -z "${PIPELINE_RUN_NAME}" ]; then
+      if [ "${attempt}" -lt "${MAX_HUB_ATTEMPTS}" ]; then
+        echo "Retrying PipelineRun creation in ${HUB_BACKOFF_SECONDS}s..."
+        sleep ${HUB_BACKOFF_SECONDS}
+        continue
+      fi
+      echo "ERROR: Failed to create PipelineRun after ${MAX_HUB_ATTEMPTS} attempts"
+      exit 1
+    fi
+
+    echo "Created PipelineRun: ${PIPELINE_RUN_NAME}"
+    echo "Waiting for Windows installation to complete (this may take up to 3 hours)..."
+
+    local WAIT_STATUS=0
+    if ! wait_for_pipelinerun "${PIPELINE_RUN_NAME}" "${MAX_HUB_ATTEMPTS}" "${TIMEOUT_SECONDS}" "${attempt}"; then
+      WAIT_STATUS=$?
+    fi
+
+    case ${WAIT_STATUS} in
+      0)
+        # Success, exit the retry loop
+        break
+        ;;
+      1)
+        # Artifact Hub resolver failed, retry if attempts remain
+        if [ "${attempt}" -lt "${MAX_HUB_ATTEMPTS}" ]; then
+          echo "Deleting PipelineRun ${PIPELINE_RUN_NAME} and retrying in ${HUB_BACKOFF_SECONDS}s..."
+          oc delete pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          sleep ${HUB_BACKOFF_SECONDS}
+          continue
+        fi
+        # All attempts exhausted
+        echo "ERROR: Failed to resolve pipeline/tasks from Artifact Hub after ${MAX_HUB_ATTEMPTS} attempts."
+        echo "The Tekton hub resolver fetches the windows-efi-installer pipeline from artifacthub.io."
+        echo "This can be a transient network error. Verify connectivity with:"
+        echo "  curl -fsS -o /dev/null -w '%{http_code}\\n' https://artifacthub.io/api/v1/packages/tekton-pipeline/redhat-pipelines/windows-efi-installer"
+        echo "If Artifact Hub is unreachable, provide your own golden image (BYOI) instead of using ACCEPT_WINDOWS_EULA."
+        echo "See: disconnected/README.md"
+        exit ${EXIT_WINDOWS_SKIP}
+        ;;
+      2)
+        # Pipeline failed (not transient), abort immediately
+        exit 1
+        ;;
+      3)
+        # Persistent API connectivity issue (transient), retry if attempts remain
+        if [ "${attempt}" -lt "${MAX_HUB_ATTEMPTS}" ]; then
+          echo "Deleting PipelineRun ${PIPELINE_RUN_NAME} and retrying in ${HUB_BACKOFF_SECONDS}s..."
+          oc delete pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          sleep ${HUB_BACKOFF_SECONDS}
+          continue
+        fi
+        exit 1
+        ;;
+      4)
+        # Installation timeout (permanent failure for this attempt)
+        if [ "${attempt}" -lt "${MAX_HUB_ATTEMPTS}" ]; then
+          echo "Windows installation timed out on attempt ${attempt}/${MAX_HUB_ATTEMPTS}. Cleaning up resources and retrying..."
+          oc delete pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          # Confirm PipelineRun is gone before deleting its storage to avoid removing active installation
+          local pr_confirmed_gone=false
+          for check_attempt in 1 2 3; do
+            if ! oc get pipelinerun "${PIPELINE_RUN_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" &>/dev/null; then
+              pr_confirmed_gone=true
+              break
+            fi
+            [ "${check_attempt}" -lt 3 ] && sleep 10
+          done
+          if [ "${pr_confirmed_gone}" != "true" ]; then
+            echo "ERROR: PipelineRun ${PIPELINE_RUN_NAME} still exists after deletion. Aborting retry to avoid deleting active installation storage."
+            exit 1
+          fi
+          # Clean up incomplete image disk from the failed attempt before retrying
+          oc delete dv "${GOLDEN_IMAGE_NAME}-iso" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          oc delete dv "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          oc delete pvc "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" --ignore-not-found --wait=true --timeout=60s || true
+          sleep ${HUB_BACKOFF_SECONDS}
+          continue
+        fi
+        exit 1
+        ;;
+    esac
+  done
 
   for attempt in 1 2 3; do
     if oc label pvc "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" app=ocp-virt-validation --overwrite; then
