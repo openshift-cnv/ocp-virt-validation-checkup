@@ -44,7 +44,7 @@ ARG OPENSHIFT_VIRT_TESTS_REPO=https://github.com/RedHatQE/openshift-virtualizati
 ARG OPENSHIFT_VIRT_TESTS_BRANCH=main
 ARG TEST_DIR=/openshift-virtualization-tests
 
-RUN dnf -y install python3-devel gcc cargo openssl-devel sshpass \
+RUN dnf -y install python3.13-devel gcc cargo openssl-devel sshpass \
         libcurl-devel libxslt-devel libxml2-devel git which && \
     dnf clean all
 
@@ -75,7 +75,7 @@ ENV USER_UID=${USER_UID} \
     HOME=${HOME}
 
 # Install system dependencies and OpenShift CLI tools
-RUN microdnf install -y jq make tar gzip python3 git which sshpass findutils grep sed \
+RUN microdnf install -y jq make tar gzip python3.13 git which sshpass findutils grep sed \
         libxslt libxml2 libatomic && \
     microdnf clean all && \
     curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xzf - -C /usr/local/bin oc kubectl && \
