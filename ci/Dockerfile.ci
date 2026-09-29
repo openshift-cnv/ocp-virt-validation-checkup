@@ -83,6 +83,10 @@ RUN microdnf install -y jq make tar gzip python3.13 git which sshpass findutils 
     chown ${USER_UID}:0 ${HOME} && \
     chmod ug+rwx ${HOME}
 
+# Enable OpenSSL legacy provider for rrmngmnt SSH compatibility with Python 3.14+
+# Fixes: Windows VM SSH connections that require MD5/SHA1 digest algorithms
+ENV OSSL_DEFAULT_PROPERTIES="default:legacy"
+
 # Copy application scripts and manifests
 COPY --chown=${USER_UID}:0 --chmod=775 scripts ${HOME}/scripts
 COPY --chown=${USER_UID}:0 --chmod=775 manifests ${HOME}/manifests
