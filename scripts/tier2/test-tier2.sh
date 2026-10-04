@@ -245,6 +245,8 @@ if [ "${DRY_RUN}" == "true" ]; then
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
     --conformance-storage-class=${STORAGE_CLASS} \
+    --tc=storage_class_a:${STORAGE_CLASS} \
+    --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
     --collect-only -q \
@@ -339,6 +341,8 @@ else
     --latest-rhel \
     --tc=hco_subscription:${SUBSCRIPTION_NAME} \
     --conformance-storage-class=${STORAGE_CLASS} \
+    --tc=storage_class_a:${STORAGE_CLASS} \
+    --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
     -s -o log_cli=true \
