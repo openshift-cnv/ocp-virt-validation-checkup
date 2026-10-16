@@ -54,6 +54,7 @@ RUN git clone --depth 1 --branch ${OPENSHIFT_VIRT_TESTS_BRANCH} ${OPENSHIFT_VIRT
 
 WORKDIR ${TEST_DIR}
 ENV UV_PYTHON_INSTALL_DIR=/opt/python
+ENV UV_PYTHON=3.14
 RUN uv sync --locked
 
 RUN chown -R ${USER_UID}:0 ${TEST_DIR} && \
