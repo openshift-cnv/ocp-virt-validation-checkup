@@ -256,25 +256,49 @@ if [ "${DS_LABEL}" == "ocp-virt-validation" ] && [ "${ACCEPT_WINDOWS_EULA}" != "
   cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
   DS_READY=""
 fi
+
+# Generate OS login configuration.
+# When --skip-artifactory-check is passed (always in self-validation),
+# py_config["os_login_param"] is never populated by the test session hook.
+# Fedora VMs that are cloned need these credentials because the target VM
+# already exists and set_login_params() cannot generate fresh random creds.
+# Windows credentials are appended when a golden image is available.
+OS_LOGIN_CONFIG="${ARTIFACTS}/os_login_config.py"
+
+cat > "${OS_LOGIN_CONFIG}" <<'PYEOF'
+os_login_param = {
+    "fedora": {
+        "username": "fedora",
+        "password": "fedora",
+    },
+    "rhel": {
+        "username": "cloud-user",
+        "password": "redhat",
+    },
+}
+PYEOF
+
 if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
    { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
   echo "Windows golden image available - Windows tests will be included"
-  WIN_LOGIN_CONFIG="${ARTIFACTS}/win_login_config.py"
-  cat > "${WIN_LOGIN_CONFIG}" <<PYEOF
-os_login_param = {
-    "win-container-disk": {
-        "username": "Administrator",
-        "password": "Administrator",
-    },
+  cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
+os_login_param["win-container-disk"] = {
+    "username": "Administrator",
+    "password": "Administrator",
 }
+PYEOF
+  WIN_IMAGE_FLAG="--tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
+else
+  MARKERS="conformance and not windows"
+fi
+
+cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
 
 config = globals().get("config") or {}
 config["os_login_param"] = os_login_param
 PYEOF
-  WIN_IMAGE_FLAG="--tc-file=${WIN_LOGIN_CONFIG} --tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
-else
-  MARKERS="conformance and not windows"
-fi
+
+OS_LOGIN_FLAG="--tc-file=${OS_LOGIN_CONFIG}"
 
 echo "Starting tier2 tests 🧪"
 echo "Using markers: ${MARKERS}"
@@ -296,6 +320,7 @@ if [ "${DRY_RUN}" == "true" ]; then
     --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${OS_LOGIN_FLAG} \
     ${WIN_IMAGE_FLAG} \
     --collect-only -q \
     "${K_ARGS[@]}" \
@@ -399,6 +424,7 @@ else
     --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${OS_LOGIN_FLAG} \
     ${WIN_IMAGE_FLAG} \
     -s -o log_cli=true \
     "${K_ARGS[@]}" \
