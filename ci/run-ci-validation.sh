@@ -20,10 +20,12 @@ fi
 # Set environment variables with defaults
 DRY_RUN="${DRY_RUN:-true}"
 OCP_VIRT_VALIDATION_TIMEOUT="${OCP_VIRT_VALIDATION_TIMEOUT:-10m}"
+ACCEPT_WINDOWS_EULA="${ACCEPT_WINDOWS_EULA:-false}"
 
 echo "=== Generating and applying validation checkup manifests ==="
 DRY_RUN="${DRY_RUN}" \
 OCP_VIRT_VALIDATION_IMAGE="${OCP_VIRT_VALIDATION_IMAGE}" \
+ACCEPT_WINDOWS_EULA="${ACCEPT_WINDOWS_EULA}" \
   ${REPO_ROOT}/manifests/run/generate.sh | oc apply -f -
 
 echo "=== Waiting for job to complete (timeout: ${OCP_VIRT_VALIDATION_TIMEOUT}) ==="

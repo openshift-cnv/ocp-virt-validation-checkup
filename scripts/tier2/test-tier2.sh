@@ -2,6 +2,9 @@
 
 set -e
 
+readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source "${SCRIPT_DIR}/../funcs.sh"
+
 function cleanup_test_namespaces() {
     echo "Cleaning up tier2 test namespaces..."
     for ns in cnv-tests-run-in-progress-ns cnv-tests-utilities; do
@@ -232,14 +235,83 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
+# Build pytest marker expression
+# Runs tests matching @pytest.mark.conformance; when no golden image is available,
+# tests with @pytest.mark.windows are excluded.
+# A golden image is available when either:
+# - ACCEPT_WINDOWS_EULA=true (tool creates golden image), or
+# - A user-provided (BYOI) DataSource exists and is Ready
+# A tool-labeled DataSource (app=ocp-virt-validation) without ACCEPT_WINDOWS_EULA
+# is treated as stale from a previous run and cleaned up, not reused as BYOI.
+MARKERS="conformance"
+WIN_IMAGE_FLAG=""
+GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
+GOLDEN_IMAGE_NAME="${GOLDEN_IMAGE_NAME:-win2k22}"
+DS_READY="$(oc get datasource "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+DS_LABEL="$(oc get datasource "${GOLDEN_IMAGE_NAME}" -n "${GOLDEN_IMAGE_NAMESPACE}" \
+  -o jsonpath='{.metadata.labels.app}' 2>/dev/null || true)"
+if [ "${DS_LABEL}" == "ocp-virt-validation" ] && [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
+  echo "WARNING: Found stale tool-managed DataSource from a previous run. Cleaning up..."
+  cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
+  DS_READY=""
+fi
+
+# Generate OS login configuration.
+# When --skip-artifactory-check is passed (always in self-validation),
+# py_config["os_login_param"] is never populated by the test session hook.
+# Fedora VMs that are cloned need these credentials because the target VM
+# already exists and set_login_params() cannot generate fresh random creds.
+# Windows credentials are appended when a golden image is available.
+OS_LOGIN_CONFIG="${ARTIFACTS}/os_login_config.py"
+
+cat > "${OS_LOGIN_CONFIG}" <<'PYEOF'
+os_login_param = {
+    "fedora": {
+        "username": "fedora",
+        "password": "fedora",
+    },
+    "rhel": {
+        "username": "cloud-user",
+        "password": "redhat",
+    },
+}
+PYEOF
+
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
+   { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
+  echo "Windows golden image available - Windows tests will be included"
+  cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
+os_login_param["win-container-disk"] = {
+    "username": "Administrator",
+    "password": "Administrator",
+}
+PYEOF
+  WIN_IMAGE_FLAG="--tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
+else
+  MARKERS="conformance and not windows"
+fi
+
+cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
+
+config = globals().get("config") or {}
+config["os_login_param"] = os_login_param
+PYEOF
+
+OS_LOGIN_FLAG="--tc-file=${OS_LOGIN_CONFIG}"
+
 echo "Starting tier2 tests 🧪"
+echo "Using markers: ${MARKERS}"
+
+# TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
+# removes the unconditional artifactory dependency from session-scoped fixtures.
 
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
-    -m "conformance" \
+    -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
@@ -249,6 +321,8 @@ if [ "${DRY_RUN}" == "true" ]; then
     --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${OS_LOGIN_FLAG} \
+    ${WIN_IMAGE_FLAG} \
     --collect-only -q \
     "${K_ARGS[@]}" \
     2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
@@ -266,7 +340,10 @@ if [ "${DRY_RUN}" == "true" ]; then
     echo "0" > "${ARTIFACTS}/.exit_code"
   fi
 
-  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS
+  # Generate JUnit XML from collected test IDs, accounting for TEST_SKIPS.
+  # Do NOT overwrite pytest's exit status just because JUnit was written —
+  # the generator may still produce XML after a collection/import failure.
+  # Exit 5 (no tests matched an explicit filter) is already normalized above.
   .venv/bin/python -c "
 import re, subprocess, sys, socket
 from xml.etree.ElementTree import Element, SubElement, ElementTree
@@ -298,7 +375,7 @@ if not test_ids:
         print(f'All tests deselected by filter: {skipped_count} counted as skipped')
 elif skip_entries:
     result = subprocess.run(
-        ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
         capture_output=True, text=True
     )
     all_collected = result.stdout
@@ -335,7 +412,7 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
 else
   rm -f "${ARTIFACTS}/.exit_code"
   (set +e; .venv/bin/pytest \
-    -m "conformance" \
+    -m "${MARKERS}" \
     -W "ignore::pytest.PytestRemovedIn10Warning" \
     --skip-artifactory-check \
     --latest-rhel \
@@ -345,6 +422,8 @@ else
     --tc=storage_class_b:${STORAGE_CLASS} \
     ${STORAGE_CLASS_CONFIG} \
     ${HCP_FLAG} \
+    ${OS_LOGIN_FLAG} \
+    ${WIN_IMAGE_FLAG} \
     -s -o log_cli=true \
     "${K_ARGS[@]}" \
     --data-collector \
@@ -417,7 +496,7 @@ skip_entries = [e for e in skip_entries if e not in focus_entries]
 
 # Collect all conformance test node IDs (without running them)
 result = subprocess.run(
-    ['.venv/bin/pytest', '--collect-only', '-q', '-m', 'conformance'],
+    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
     capture_output=True, text=True
 )
 collected = result.stdout

@@ -109,6 +109,11 @@ for ginkgo_label_name in $(jq -r '.[].ginkgo_label_name' $skip_tests_labels_file
   label_filter+=( "!($ginkgo_label_name)" )
 done
 
+# When a primary network binding plugin is in use, exclude masquerade-specific tests
+if [ "${SIG}" == "network" ] && [ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" ]; then
+  label_filter+=( "!(interface-ports)" "!(network-cidr)" "!(IPv6)" )
+fi
+
 # If TEST_FOCUS is set, remove any overlapping entries from skip list so focused tests run
 if [ -n "${TEST_FOCUS}" ]; then
   IFS='|' read -ra focus_entries <<< "${TEST_FOCUS}"
@@ -214,6 +219,13 @@ fi
 
 label_filter_str="--ginkgo.label-filter=${label_filter_joined}"
 
+# Build primary network binding plugin flag for network tests
+BINDING_PLUGIN_ARGS=()
+if [ "${SIG}" == "network" ] && [ -n "${PRIMARY_NETWORK_BINDING_PLUGIN}" ]; then
+  BINDING_PLUGIN_ARGS+=("--primary-network-binding-plugin=${PRIMARY_NETWORK_BINDING_PLUGIN}")
+  echo "Using primary network binding plugin: ${PRIMARY_NETWORK_BINDING_PLUGIN}"
+fi
+
 # Apply disk-images-provider if running storage tests (but not in dry-run mode)
 if [ "${SIG}" == "storage" ] && [ -z "${DRY_RUN_FLAG}" ]; then
     apply_disk_images_provider
@@ -239,6 +251,7 @@ echo "Starting ${SIG} tests 🧪"
     -utility-container-tag="${KUBEVIRT_RELEASE}" \
     ${GINKGO_FLAKE} \
     ${DRY_RUN_FLAG} \
+    "${BINDING_PLUGIN_ARGS[@]}" \
     "${skip_arg}"; echo $? > "${ARTIFACTS}/.exit_code") 2>&1 | tee ${ARTIFACTS}/${SIG}-log.txt &
 
 # Store the PID for cleanup

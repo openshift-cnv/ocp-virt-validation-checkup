@@ -6,6 +6,9 @@ readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/funcs.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
+export GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
+export GOLDEN_IMAGE_NAME="${GOLDEN_IMAGE_NAME:-win2k22}"
+
 create_kubeconfig
 
 # Add owner reference to PVC so it gets cleaned up when the job is deleted
@@ -48,9 +51,7 @@ add_pvc_owner_reference() {
   echo "Found owner Job: ${job_name} (UID: ${job_uid})"
 
   # Patch PVC with owner reference
-  oc patch pvc "${pvc_name}" -n "${namespace}" --type=json -p "[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[{\"apiVersion\":\"batch/v1\",\"kind\":\"Job\",\"name\":\"${job_name}\",\"uid\":\"${job_uid}\",\"controller\":true,\"blockOwnerDeletion\":true}]}]" 2>/dev/null
-
-  if [ $? -eq 0 ]; then
+  if oc patch pvc "${pvc_name}" -n "${namespace}" --type=json -p "[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[{\"apiVersion\":\"batch/v1\",\"kind\":\"Job\",\"name\":\"${job_name}\",\"uid\":\"${job_uid}\",\"controller\":true,\"blockOwnerDeletion\":true}]}]" 2>/dev/null; then
     echo "Successfully added owner reference to PVC ${pvc_name}"
   else
     echo "Warning: Failed to add owner reference to PVC ${pvc_name}"
@@ -181,6 +182,28 @@ CURRENT_TEST_PID=""
 # Progress watcher PID (will be started later after storage config is set)
 PROGRESS_WATCHER_PID=""
 
+# Cleanup Windows golden image resources.
+# Only clean up what the current run created.
+# EULA gate: if this run didn't create the namespace, don't touch it.
+# Label gate: if the namespace isn't tool-labeled, it belongs to the user (BYOI).
+cleanup_windows_resources() {
+    if [ "${ACCEPT_WINDOWS_EULA}" != "true" ]; then
+        return
+    fi
+    # Prefer ownership recorded by setup-golden-image.sh for this run.
+    CREATED_GOLDEN_NAMESPACE=""
+    if [ -n "${RESULTS_DIR}" ] && [ -f "${RESULTS_DIR}/.windows_setup_state" ]; then
+        # shellcheck disable=SC1090
+        source "${RESULTS_DIR}/.windows_setup_state"
+    fi
+    if [ "${CREATED_GOLDEN_NAMESPACE}" == "true" ]; then
+        cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}"
+    else
+        echo "Skipping full Windows namespace delete (namespace was not created by this run)."
+        cleanup_golden_image_resources "${GOLDEN_IMAGE_NAMESPACE}" selective
+    fi
+}
+
 # Function to cleanup progress watcher and forward signals
 cleanup_and_forward_signal() {
     echo "Entrypoint received termination signal, cleaning up..."
@@ -202,6 +225,8 @@ cleanup_and_forward_signal() {
         wait "${PROGRESS_WATCHER_PID}" 2>/dev/null || true
         echo "Progress watcher stopped."
     fi
+
+    cleanup_windows_resources
     
     exit 1
 }
@@ -384,6 +409,51 @@ else
   fi
 fi
 
+# ======================
+# Windows Golden Image Setup
+# ======================
+# Run the Windows setup script which handles both paths:
+#   - BYOI: DataSource exists and is Ready → exits immediately
+#   - Tool-created: ACCEPT_WINDOWS_EULA=true → runs pipeline
+# Exit code contract with setup-golden-image.sh (must stay in sync):
+#   0              = success or expected skip (BYOI ready, EULA not set)
+#   EXIT_WINDOWS_SKIP = prerequisite missing (no internet, pipeline not installed) — skip Windows gracefully, other suites continue
+#   anything else  = real failure (pipeline ran and failed, timeout, config error) — hard fail so CI detects it
+readonly EXIT_WINDOWS_SKIP=2
+
+WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
+if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
+  # Tool-managed image creation is expensive (1-3h). Skip it for dry-runs and when
+  # tier2 (the only suite that runs Windows tests) is not selected. Existing Ready
+  # DataSources (BYOI / prior runs) are still detected by tier2 itself.
+  if [ "${DRY_RUN}" == "true" ]; then
+    echo "Skipping Windows golden image setup (DRY_RUN=true)."
+  elif ! suite_enabled "tier2"; then
+    echo "Skipping Windows golden image setup (tier2 suite not selected)."
+  else
+    export STORAGE_CLASS
+    export WIN_IMAGE_DOWNLOAD_URL
+    export TEKTON_PIPELINE_VERSION
+    export ACCEPT_WINDOWS_EULA
+    export RESULTS_DIR
+    WINDOWS_SETUP_EXIT=0
+    bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
+    case ${WINDOWS_SETUP_EXIT} in
+      0)
+        ;;
+      "${EXIT_WINDOWS_SKIP}")
+        echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
+        echo "All other test suites will continue normally."
+        unset ACCEPT_WINDOWS_EULA
+        ;;
+      *)
+        echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
+        exit 1
+        ;;
+    esac
+  fi
+fi
+
 # Start progress watcher in background AFTER storage config is set
 echo "Starting progress watcher for multi-suite monitoring..."
 progress_watcher --results-dir="${RESULTS_DIR}" &
@@ -480,6 +550,11 @@ if [ -d "${RESULTS_DIR}/.dry-run" ]; then
     echo "Cleaning up .dry-run directory..."
     rm -rf "${RESULTS_DIR}/.dry-run"
 fi
+
+# ================================
+# Windows Golden Image Cleanup
+# ================================
+cleanup_windows_resources
 
 # =========
 # Summarize
