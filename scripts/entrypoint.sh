@@ -538,6 +538,7 @@ cleanup_windows_resources
 # =========
 # Summarize
 # =========
+set -o pipefail
 PARSER_EXIT=0
 junit_parser --results-dir=${RESULTS_DIR}  --start-timestamp=${START_TIMESTAMP} --completion-timestamp=${COMPLETION_TIMESTAMP} | tee ${RESULTS_DIR}/summary-log.txt || PARSER_EXIT=$?
 
