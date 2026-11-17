@@ -4,6 +4,13 @@ set -e
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/../funcs.sh"
+source "${SCRIPT_DIR}/../test-suites.sh"
+
+# Prefer selection resolved by entrypoint; otherwise resolve from TEST_SUITES.
+if [[ -z "${RESOLVED_TIER2_SUITES:-}" ]]; then
+  resolve_test_suites "${TEST_SUITES:-tier2}" || exit 1
+fi
+TIER2_ALL_MODULES="${TIER2_ALL_MODULES:-false}"
 
 function cleanup_test_namespaces() {
     echo "Cleaning up tier2 test namespaces..."
@@ -235,9 +242,13 @@ if [ -n "${K_EXPR}" ]; then
   K_ARGS=(-k "${K_EXPR}")
 fi
 
-# Build pytest marker expression
-# Runs tests matching @pytest.mark.conformance; when no golden image is available,
-# tests with @pytest.mark.windows are excluded.
+WINDOWS_REQUESTED=false
+if tier2_sig_enabled "windows"; then
+  WINDOWS_REQUESTED=true
+fi
+
+# Runs tests matching @pytest.mark.conformance; when Windows is not selected or
+# no golden image is available, tests with @pytest.mark.windows are excluded.
 # A golden image is available when either:
 # - ACCEPT_WINDOWS_EULA=true (tool creates golden image), or
 # - A user-provided (BYOI) DataSource exists and is Ready
@@ -278,8 +289,20 @@ os_login_param = {
 }
 PYEOF
 
-if [ "${ACCEPT_WINDOWS_EULA}" == "true" ] || \
-   { [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; }; then
+# Image is usable when:
+# - EULA tool-managed path is active (setup already ran, or dry-run discovery), or
+# - BYOI DataSource is Ready and not a stale tool-managed leftover.
+WINDOWS_IMAGE_AVAILABLE=false
+if [ "${ACCEPT_WINDOWS_EULA}" == "true" ]; then
+  WINDOWS_IMAGE_AVAILABLE=true
+elif [ "${DS_READY}" == "True" ] && [ "${DS_LABEL}" != "ocp-virt-validation" ]; then
+  WINDOWS_IMAGE_AVAILABLE=true
+fi
+
+WINDOWS_WILL_RUN=false
+TIER2_SPLIT_WINDOWS=false
+if [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" == "true" ]; then
+  WINDOWS_WILL_RUN=true
   echo "Windows golden image available - Windows tests will be included"
   cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
 os_login_param["win-container-disk"] = {
@@ -288,8 +311,43 @@ os_login_param["win-container-disk"] = {
 }
 PYEOF
   WIN_IMAGE_FLAG="--tc=win_golden_image_name:${GOLDEN_IMAGE_NAME}"
+elif [ "${WINDOWS_REQUESTED}" == "true" ] && [ "${WINDOWS_IMAGE_AVAILABLE}" != "true" ]; then
+  if tier2_windows_only; then
+    # Explicit Windows-only request with no image must not report a green empty run.
+    if [ "${DRY_RUN}" == "true" ]; then
+      echo "WARNING: tier2/windows selected but no golden image is available (dry-run)."
+      MARKERS="conformance and windows"
+    else
+      echo "ERROR: tier2/windows selected but no golden image is available."
+      echo "Provide a Ready BYOI DataSource or set ACCEPT_WINDOWS_EULA=true."
+      echo 1 > "${ARTIFACTS}/.exit_code"
+      exit 1
+    fi
+  else
+    echo "WARNING: tier2/windows selected but no golden image is available; Windows tests will be skipped"
+    MARKERS="conformance and not windows"
+  fi
 else
+  # Windows not selected — exclude even if a golden image happens to exist.
   MARKERS="conformance and not windows"
+fi
+
+# Path SIGs map to OVT module directories. Mixed path+Windows keeps these paths for
+# the non-Windows phase and runs Windows cross-module in a second phase.
+build_tier2_path_args
+
+if [ "${WINDOWS_WILL_RUN}" == "true" ]; then
+  if tier2_windows_only; then
+    MARKERS="conformance and windows"
+  elif [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]]; then
+    # Keep path scope for non-Windows; Windows runs separately across modules.
+    MARKERS="conformance and not windows"
+    TIER2_SPLIT_WINDOWS=true
+    echo "Mixed path + Windows selection: path-scoped non-Windows, then cross-module Windows"
+  else
+    # Legacy / unrestricted Tier-2 with Windows available.
+    MARKERS="conformance"
+  fi
 fi
 
 cat >> "${OS_LOGIN_CONFIG}" <<'PYEOF'
@@ -301,15 +359,90 @@ PYEOF
 OS_LOGIN_FLAG="--tc-file=${OS_LOGIN_CONFIG}"
 
 echo "Starting tier2 tests 🧪"
+echo "Resolved Tier-2 suites: ${RESOLVED_TIER2_SUITES}"
 echo "Using markers: ${MARKERS}"
+if [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]]; then
+  echo "Using module paths: ${TIER2_PATH_ARGS[*]}"
+else
+  echo "Using module paths: <all modules>"
+fi
+
+# Only TEST_FOCUS/TEST_SKIPS may legitimately collect zero tests.
+# Path filters and windows-only markers must NOT mask empty collection as success.
+TIER2_SELECTIVE_FILTER=false
+if [ -n "${K_EXPR}" ]; then
+  TIER2_SELECTIVE_FILTER=true
+fi
+
+# Python literal list of selected module paths for auxiliary collect-only calls
+# (TEST_SKIPS counting must use the same path scope as the main pytest run).
+TIER2_PATH_ARGS_PY="[]"
+if [[ ${#TIER2_PATH_ARGS[@]} -gt 0 ]]; then
+  TIER2_PATH_ARGS_PY="$(printf '%s\n' "${TIER2_PATH_ARGS[@]}" | .venv/bin/python -c 'import json,sys; print(json.dumps([l.rstrip("\n") for l in sys.stdin if l.strip()]))')"
+fi
+
+merge_junit_files() {
+  local primary="$1"
+  local secondary="$2"
+  local output="$3"
+  .venv/bin/python -c "
+import sys
+import xml.etree.ElementTree as ET
+
+primary, secondary, output = sys.argv[1:4]
+
+def as_testsuites(root):
+    if root.tag == 'testsuites':
+        return root
+    if root.tag == 'testsuite':
+        wrapper = ET.Element('testsuites')
+        wrapper.append(root)
+        return wrapper
+    return root
+
+def suites_of(root):
+    if root.tag == 'testsuite':
+        return [root]
+    return list(root.findall('testsuite'))
+
+root = as_testsuites(ET.parse(primary).getroot())
+for suite in suites_of(ET.parse(secondary).getroot()):
+    root.append(suite)
+
+tests = failures = errors = skipped = 0
+for suite in root.findall('testsuite'):
+    tests += int(suite.get('tests') or 0)
+    failures += int(suite.get('failures') or 0)
+    errors += int(suite.get('errors') or 0)
+    skipped += int(suite.get('skipped') or 0)
+root.set('tests', str(tests))
+root.set('failures', str(failures))
+root.set('errors', str(errors))
+root.set('skipped', str(skipped))
+ET.ElementTree(root).write(output, xml_declaration=True, encoding='unicode')
+print(f'Merged JUnit XML into {output}')
+" "${primary}" "${secondary}" "${output}"
+}
 
 # TODO: Remove --skip-artifactory-check before GA once openshift-virtualization-tests
 # removes the unconditional artifactory dependency from session-scoped fixtures.
 
+# Drop split-phase markers from any prior invocation in this results dir so a
+# non-split rerun cannot inherit old setup-failure classification, and so phase1
+# evidence cannot be a stale primary JUnit from a previous attempt.
+clear_tier2_result_artifacts() {
+  rm -f "${ARTIFACTS}/.exit_code" \
+        "${ARTIFACTS}/.exit_code_phase1" \
+        "${ARTIFACTS}/.exit_code_windows" \
+        "${ARTIFACTS}/junit.results.xml" \
+        "${ARTIFACTS}/junit.phase1.xml" \
+        "${ARTIFACTS}/junit.windows.xml"
+}
+
 if [ "${DRY_RUN}" == "true" ]; then
   # In dry-run mode, collect tests and generate a proper JUnit XML with all
   # testcase elements -- aligned with how Ginkgo's --ginkgo.dry-run works.
-  rm -f "${ARTIFACTS}/.exit_code"
+  clear_tier2_result_artifacts
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     --skip-artifactory-check \
@@ -324,17 +457,18 @@ if [ "${DRY_RUN}" == "true" ]; then
     ${WIN_IMAGE_FLAG} \
     --collect-only -q \
     "${K_ARGS[@]}" \
+    "${TIER2_PATH_ARGS[@]}" \
     2>&1; echo $? > "${ARTIFACTS}/.exit_code") | tee ${ARTIFACTS}/tier2-log.txt &
 
   TEST_PID=$!
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
-  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
-  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # Handle pytest exit code 5 (no tests collected due to -k/-m/path filter deselection).
+  # Only treat as success when a selective filter was explicitly set;
   # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
   TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
-  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+  if [ "${TIER2_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
     echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
     echo "0" > "${ARTIFACTS}/.exit_code"
   fi
@@ -374,7 +508,7 @@ if not test_ids:
         print(f'All tests deselected by filter: {skipped_count} counted as skipped')
 elif skip_entries:
     result = subprocess.run(
-        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
+        ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'] + ${TIER2_PATH_ARGS_PY},
         capture_output=True, text=True
     )
     all_collected = result.stdout
@@ -412,8 +546,85 @@ print(f'Generated JUnit XML with {total_tests} test(s) ({len(test_ids)} collecte
     echo 0 > "${ARTIFACTS}/.exit_code"
   fi
 
+  # Second phase: cross-module Windows collect for mixed path+Windows selections.
+  # Run even if phase 1 failed so Windows coverage still appears in the report.
+  if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
+    PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
+    echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code_phase1"
+    rm -f "${ARTIFACTS}/junit.phase1.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/.exit_code_windows"
+    if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      cp "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.phase1.xml"
+    fi
+    echo "Collecting cross-module Windows tests (dry-run phase 2)..."
+    (set +e; .venv/bin/pytest \
+      -m "conformance and windows" \
+      --skip-artifactory-check \
+      --latest-rhel \
+      --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+      --conformance-storage-class=${STORAGE_CLASS} \
+      --tc=storage_class_a:${STORAGE_CLASS} \
+      --tc=storage_class_b:${STORAGE_CLASS} \
+      ${STORAGE_CLASS_CONFIG} \
+      ${HCP_FLAG} \
+      ${OS_LOGIN_FLAG} \
+      ${WIN_IMAGE_FLAG} \
+      --collect-only -q \
+      "${K_ARGS[@]}" \
+      2>&1; echo $? > "${ARTIFACTS}/.exit_code_windows") | tee "${ARTIFACTS}/tier2-windows-log.txt" &
+    TEST_PID=$!
+    wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code_windows"
+    cat "${ARTIFACTS}/tier2-windows-log.txt" >> "${ARTIFACTS}/tier2-log.txt"
+    WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
+    # Exit 5 (no tests collected) is success only with an explicit focus/skip filter.
+    # Persist the normalized status so NewResultMap sees the same accepted code.
+    if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
+      WIN_EXIT=0
+      echo 0 > "${ARTIFACTS}/.exit_code_windows"
+    fi
+    if [ "${WIN_EXIT}" == "0" ]; then
+      .venv/bin/python -c "
+import sys, socket
+from xml.etree.ElementTree import Element, SubElement, ElementTree
+from datetime import datetime, timezone
+
+log_path, junit_path = sys.argv[1:3]
+with open(log_path) as f:
+    lines = f.readlines()
+test_ids = [l.strip() for l in lines if '::' in l and not l.startswith(('=', '-', ' '))]
+testsuites = Element('testsuites', name='pytest tests')
+ts = SubElement(testsuites, 'testsuite',
+    name='pytest-windows',
+    errors='0', failures='0', skipped='0',
+    tests=str(len(test_ids)), time='0.000',
+    timestamp=datetime.now(timezone.utc).isoformat(),
+    hostname=socket.gethostname(),
+)
+for tid in test_ids:
+    parts = tid.split('::')
+    module = parts[0].replace('/', '.').removesuffix('.py') if parts else ''
+    name = parts[-1] if parts else tid
+    classname = '.'.join(parts[:-1]).replace('/', '.').removesuffix('.py') if len(parts) > 1 else module
+    SubElement(ts, 'testcase', classname=classname, name=name, time='0.000')
+ElementTree(testsuites).write(junit_path, xml_declaration=True, encoding='unicode')
+print(f'Generated Windows dry-run JUnit with {len(test_ids)} test(s)')
+" "${ARTIFACTS}/tier2-windows-log.txt" "${ARTIFACTS}/junit.windows.xml"
+      if [ -f "${ARTIFACTS}/junit.results.xml" ] && [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
+        merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+      elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
+        cp "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+      fi
+    fi
+    if [ "${PHASE1_EXIT}" != "0" ]; then
+      echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code"
+    elif [ "${WIN_EXIT}" != "0" ]; then
+      echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
+    else
+      echo 0 > "${ARTIFACTS}/.exit_code"
+    fi
+  fi
+
 else
-  rm -f "${ARTIFACTS}/.exit_code"
+  clear_tier2_result_artifacts
   (set +e; .venv/bin/pytest \
     -m "${MARKERS}" \
     --skip-artifactory-check \
@@ -428,6 +639,7 @@ else
     ${WIN_IMAGE_FLAG} \
     -s -o log_cli=true \
     "${K_ARGS[@]}" \
+    "${TIER2_PATH_ARGS[@]}" \
     --data-collector \
     --data-collector-output-dir=${ARTIFACTS} \
     --pytest-log-file=${ARTIFACTS}/pytest-logs.txt \
@@ -437,11 +649,11 @@ else
   echo "Tier2 test process started with PID: ${TEST_PID}"
   wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code"
 
-  # Handle pytest exit code 5 (no tests collected due to -k/-m filter deselection).
-  # Only treat as success when a filter (TEST_FOCUS/TEST_SKIPS) was explicitly set;
+  # Handle pytest exit code 5 (no tests collected due to -k/-m/path filter deselection).
+  # Only treat as success when a selective filter was explicitly set;
   # without filters, exit 5 indicates a genuine collection failure (broken markers, etc.).
   TIER2_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "0")
-  if [ "${TIER2_EXIT}" == "5" ] && [ -n "${K_EXPR}" ]; then
+  if [ "${TIER2_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
     echo "No tier2 tests matched the filter (pytest exit code 5). Treating as success with 0 tests run."
     echo "0" > "${ARTIFACTS}/.exit_code"
 
@@ -496,9 +708,9 @@ focus_entries = sys.argv[3].split('|') if sys.argv[3] else []
 # Remove entries that are also in TEST_FOCUS (they were not skipped)
 skip_entries = [e for e in skip_entries if e not in focus_entries]
 
-# Collect all conformance test node IDs (without running them)
+# Collect conformance test node IDs within the same path scope as the main run
 result = subprocess.run(
-    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'],
+    ['.venv/bin/pytest', '--collect-only', '-q', '-m', '${MARKERS}'] + ${TIER2_PATH_ARGS_PY},
     capture_output=True, text=True
 )
 collected = result.stdout
@@ -517,5 +729,60 @@ if matched:
         ts.set('skipped', str(int(ts.get('skipped', '0')) + len(matched)))
     tree.write(junit_path, xml_declaration=True, encoding='unicode')
 " "${ARTIFACTS}/junit.results.xml" "${TEST_SKIPS}" "${TEST_FOCUS}"
+  fi
+
+  # Second phase: cross-module Windows for mixed path+Windows selections.
+  # Always run after phase 1 (including ordinary test failures) so Windows
+  # coverage is not lost; combine statuses and merge available JUnit files.
+  if [ "${TIER2_SPLIT_WINDOWS}" == "true" ]; then
+    PHASE1_EXIT=$(cat "${ARTIFACTS}/.exit_code" 2>/dev/null || echo "1")
+    echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code_phase1"
+    # Drop stale per-phase artifacts so retries cannot merge a previous run's XML.
+    rm -f "${ARTIFACTS}/junit.phase1.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/.exit_code_windows"
+    if [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      cp "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.phase1.xml"
+    fi
+    echo "Running cross-module Windows tests (phase 2)..."
+    (set +e; .venv/bin/pytest \
+      -m "conformance and windows" \
+      --skip-artifactory-check \
+      --latest-rhel \
+      --tc=hco_subscription:${SUBSCRIPTION_NAME} \
+      --conformance-storage-class=${STORAGE_CLASS} \
+      --tc=storage_class_a:${STORAGE_CLASS} \
+      --tc=storage_class_b:${STORAGE_CLASS} \
+      ${STORAGE_CLASS_CONFIG} \
+      ${HCP_FLAG} \
+      ${OS_LOGIN_FLAG} \
+      ${WIN_IMAGE_FLAG} \
+      -s -o log_cli=true \
+      "${K_ARGS[@]}" \
+      --data-collector \
+      --data-collector-output-dir=${ARTIFACTS} \
+      --pytest-log-file=${ARTIFACTS}/pytest-windows-logs.txt \
+      --junitxml="${ARTIFACTS}/junit.windows.xml"; echo $? > "${ARTIFACTS}/.exit_code_windows") 2>&1 | tee -a "${ARTIFACTS}/tier2-log.txt" &
+    TEST_PID=$!
+    echo "Tier2 Windows phase started with PID: ${TEST_PID}"
+    wait_for_pytest_pipeline "${TEST_PID}" "${ARTIFACTS}/.exit_code_windows"
+    WIN_EXIT=$(cat "${ARTIFACTS}/.exit_code_windows" 2>/dev/null || echo "0")
+    if [ "${WIN_EXIT}" == "5" ] && [ "${TIER2_SELECTIVE_FILTER}" == "true" ]; then
+      echo "No Windows tests matched the filter (pytest exit code 5). Treating Windows phase as success."
+      WIN_EXIT=0
+      echo 0 > "${ARTIFACTS}/.exit_code_windows"
+    fi
+    # Merge only XML produced by this invocation (file was removed before the phase).
+    # Merge even on failure so real Windows failures appear in the primary report.
+    if [ -f "${ARTIFACTS}/junit.windows.xml" ] && [ -f "${ARTIFACTS}/junit.results.xml" ]; then
+      merge_junit_files "${ARTIFACTS}/junit.results.xml" "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+    elif [ -f "${ARTIFACTS}/junit.windows.xml" ]; then
+      cp "${ARTIFACTS}/junit.windows.xml" "${ARTIFACTS}/junit.results.xml"
+    fi
+    if [ "${PHASE1_EXIT}" != "0" ]; then
+      echo "${PHASE1_EXIT}" > "${ARTIFACTS}/.exit_code"
+    elif [ "${WIN_EXIT}" != "0" ]; then
+      echo "${WIN_EXIT}" > "${ARTIFACTS}/.exit_code"
+    else
+      echo 0 > "${ARTIFACTS}/.exit_code"
+    fi
   fi
 fi

@@ -48,11 +48,27 @@ while IFS= read -r line; do
   fi
 done < "${SUMMARY_LOG}"
 
+# Auxiliary per-phase Windows / path copies are merged into junit.results.xml;
+# do not treat them as independent suites for summary validation.
+is_primary_junit_file() {
+  local base
+  base="$(basename "$1")"
+  case "${base}" in
+    junit.windows.xml|junit.phase1.xml)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 # Collect all JUnit suite names
 declare -A JUNIT_SUITES
 
 # Find and validate each JUnit file
 for junit_file in $(find "${RESULTS_DIR}" -type f -name "junit*.xml"); do
+  if ! is_primary_junit_file "${junit_file}"; then
+    continue
+  fi
   # Determine suite name from path (e.g., _out/compute/junit.results.xml -> compute)
   SUITE_NAME=$(basename $(dirname "${junit_file}"))
   JUNIT_SUITES["$SUITE_NAME"]=1
@@ -80,6 +96,9 @@ echo ""
 
 # Validate counts for each JUnit file
 for junit_file in $(find "${RESULTS_DIR}" -type f -name "junit*.xml"); do
+  if ! is_primary_junit_file "${junit_file}"; then
+    continue
+  fi
   # Determine suite name from path (e.g., _out/compute/junit.results.xml -> compute)
   SUITE_NAME=$(basename $(dirname "${junit_file}"))
 
@@ -88,9 +107,17 @@ for junit_file in $(find "${RESULTS_DIR}" -type f -name "junit*.xml"); do
     continue
   fi
 
-  # Parse JUnit XML header to extract counts
-  # Use word boundary to match <testsuite but not <testsuites
-  JUNIT_LINE=$(head -10 "${junit_file}" | grep -m 1 '<testsuite ')
+  # Prefer aggregate <testsuites ...> counts only for pytest-style merges that
+  # include skipped= (path+Windows). SSP/Ginkgo wrappers often have tests= and
+  # disabled= without skipped=; those must use the child <testsuite> header so
+  # counts match the summary parser.
+  JUNIT_LINE=$(grep -m 1 '<testsuites ' "${junit_file}" || true)
+  if [[ -z "${JUNIT_LINE}" ]] \
+    || ! [[ ${JUNIT_LINE} =~ tests=\"([0-9]+)\" ]] \
+    || ! [[ ${JUNIT_LINE} =~ skipped=\"([0-9]+)\" ]]; then
+    # Match <testsuite but not <testsuites
+    JUNIT_LINE=$(grep -m 1 '<testsuite ' "${junit_file}" || true)
+  fi
 
   # Detect format: pytest includes skipped in header, ginkgo doesn't
   IS_PYTEST=false

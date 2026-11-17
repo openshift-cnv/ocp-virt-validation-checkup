@@ -130,30 +130,38 @@ The default settings of the validation checkup can be modified before the execut
 
 #### Test Suites
 By default, the validation checkup will run all of the test suites.  
-It is possible to configure a subset of the suites to run. The available test suites are:
-* `compute` - conformance tests with `sig-compute` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository.
-* `network` - conformance tests with `sig-network` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
-* `storage` - conformance tests with `sig-storage` label + tests with `StorageCritical` label from the [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests) repository
-* `ssp` - tests from [ssp-operator](https://github.com/kubevirt/ssp-operator/tree/main/tests) repository.
-* `tier2` - Conformance tests from [openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests) repository.
+Suites are selected with `TEST_SUITES` using **tier** + **SIG** granularity:
 
-Use the `TEST_SUITES` environment variable, with a comma separated list of the desired suites, when running the `generate` script. The example below shows how to run only the `compute` and the `network` suites, by setting `TEST_SUITES` to `"compute,network"`:
+**Tier-1** (KubeVirt / SSP):
+* `tier1/compute` - conformance tests with `sig-compute` from [KubeVirt](https://github.com/kubevirt/kubevirt/tree/main/tests)
+* `tier1/network` - conformance tests with `sig-network` from KubeVirt
+* `tier1/storage` - conformance tests with `sig-storage` + `StorageCritical` from KubeVirt
+* `tier1/ssp` - tests from [ssp-operator](https://github.com/kubevirt/ssp-operator/tree/main/tests)
+
+**Tier-2** ([openshift-virtualization-tests](https://github.com/RedHatQE/openshift-virtualization-tests), by module path):
+* `tier2/compute` - `tests/virt/` + `@pytest.mark.conformance`
+* `tier2/storage` - `tests/storage/` + `@pytest.mark.conformance`
+* `tier2/network` - `tests/network/` + `@pytest.mark.conformance`
+* `tier2/infrastructure` - `tests/infrastructure/` + `@pytest.mark.conformance`
+* `tier2/windows` - `@pytest.mark.conformance and windows` (requires a golden image)
+
+Examples:
 ```bash
-$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=compute,network,tier2 ${OCP_VIRT_VALIDATION_IMAGE} generate
+# Tier-1 storage only
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=tier1/storage ${OCP_VIRT_VALIDATION_IMAGE} generate
+
+# Storage across both repos
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=tier1/storage,tier2/storage ${OCP_VIRT_VALIDATION_IMAGE} generate
+
+# Windows only
+$ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} -e TEST_SUITES=tier2/windows ${OCP_VIRT_VALIDATION_IMAGE} generate
 ```
-This will configure the following environment variable for the job:
-```yaml
-apiVersion: batch/v1
-kind: Job
-spec:
-  template:
-    spec:
-      containers:
-        - name: ocp-virt-validation-checkup
-          env:
-            - name: TEST_SUITES
-              value: compute,network,tier2
-```
+
+**Backward compatibility:** legacy flat values still work and keep today’s meaning:
+* `compute` / `network` / `storage` / `ssp` → `tier1/<same>` (Tier-1 only)
+* `tier2` → all Tier-2 SIGs
+
+So `TEST_SUITES=storage` remains Tier-1 KubeVirt storage only. Use `tier1/storage,tier2/storage` for both repos.
 
 **Note:** the value passed to `TEST_SUITES` should be comma-separated.
 
@@ -325,7 +333,7 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `ACCEPT_WINDOWS_EULA` | Enable Windows testing (must be `true` to enable) | `false` |
+| `ACCEPT_WINDOWS_EULA` | Enable Windows testing (adds `tier2/windows`; Windows is Tier-2 only) | `false` |
 | `WIN_IMAGE_DOWNLOAD_URL` | Custom Windows Server 2022 ISO download URL | Default Microsoft URL |
 | `TEKTON_PIPELINE_VERSION` | Version of the `windows-efi-installer` pipeline | `>=v4.21.0` |
 
@@ -344,7 +352,7 @@ $ podman run -e OCP_VIRT_VALIDATION_IMAGE=${OCP_VIRT_VALIDATION_IMAGE} \
 3. The pipeline downloads the ISO and installs Windows Server 2022 with OpenSSH, QEMU guest agent, and firewall disabled
 4. A DataSource (`win2k22`) is created backed by the output PVC
 5. A temporary VM (`win-ssh-verify-*`) boots from the golden image to verify SSH (port 22) is reachable. If verification fails the entire checkup aborts — check `C:\post-update.log` inside the golden image for diagnosis.
-6. The tier2 test suite runs tests matching `@pytest.mark.conformance`; when no golden image is available, tests with `@pytest.mark.windows` are excluded
+6. When `tier2/windows` is selected (or legacy `tier2`), Windows conformance tests run if a golden image is available; otherwise `@pytest.mark.windows` tests are excluded
 7. After tests complete, the entire `validation-os-images` namespace is deleted
 
 **Note:** The initial Windows image creation takes approximately 1-2 hours (up to 3 hours on slow networks).

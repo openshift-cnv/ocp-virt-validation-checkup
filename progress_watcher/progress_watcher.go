@@ -369,25 +369,62 @@ func discoverTestSuites(resultsDir string) []*TestSuite {
 	return suites
 }
 
-// getTotalExpectedSuites returns the total number of test suites that could be executed
-func getTotalExpectedSuites() int {
-	// Read from TEST_SUITES environment variable (comma-separated list)
-	testSuites := os.Getenv("TEST_SUITES")
-	if testSuites == "" {
-		// Default to all 5 suites if not specified
-		return 5
+// progressSuiteNames returns the execution-unit suite names used for progress
+// monitoring (compute/network/storage/ssp/tier2). Prefers PROGRESS_SUITES exported
+// by entrypoint after resolving hierarchical TEST_SUITES; falls back to normalizing
+// TEST_SUITES (legacy aliases and tier1/*/tier2/* forms).
+func progressSuiteNames() []string {
+	if progress := strings.TrimSpace(os.Getenv("PROGRESS_SUITES")); progress != "" {
+		return splitNonEmpty(progress)
 	}
 
-	// Split by comma and count
-	suites := strings.Split(testSuites, ",")
-	count := 0
-	for _, suite := range suites {
-		if strings.TrimSpace(suite) != "" {
-			count++
+	testSuites := os.Getenv("TEST_SUITES")
+	if strings.TrimSpace(testSuites) == "" {
+		return []string{"compute", "network", "storage", "ssp", "tier2"}
+	}
+
+	seen := make(map[string]bool)
+	var suites []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		suites = append(suites, name)
+	}
+
+	for _, raw := range strings.Split(testSuites, ",") {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			continue
+		}
+		switch {
+		case token == "tier2" || strings.HasPrefix(token, "tier2/"):
+			add("tier2")
+		case strings.HasPrefix(token, "tier1/"):
+			add(strings.TrimPrefix(token, "tier1/"))
+		default:
+			// Legacy flat aliases: compute|network|storage|ssp
+			add(token)
 		}
 	}
+	return suites
+}
 
-	return count
+func splitNonEmpty(csv string) []string {
+	var out []string
+	for _, part := range strings.Split(csv, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// getTotalExpectedSuites returns the total number of test suites that could be executed
+func getTotalExpectedSuites() int {
+	return len(progressSuiteNames())
 }
 
 // discoverTestTotalsByDryRun runs dry-run commands to discover total test counts upfront
@@ -406,24 +443,13 @@ func discoverTestTotalsByDryRun(resultsDir string) map[string]int {
 		}
 	}()
 
-	// Get configured test suites
-	testSuitesEnv := os.Getenv("TEST_SUITES")
-	if testSuitesEnv == "" {
-		testSuitesEnv = "compute,network,storage,ssp,tier2" // Default all suites
-	}
-
-	logger.Printf("TEST_SUITES environment variable: %s\n", testSuitesEnv)
-
-	configuredSuites := strings.Split(testSuitesEnv, ",")
-	logger.Printf("Will attempt dry-run discovery for %d suites\n", len(configuredSuites))
+	// Get configured test suites (normalized to execution units).
+	configuredSuites := progressSuiteNames()
+	logger.Printf("TEST_SUITES environment variable: %s\n", os.Getenv("TEST_SUITES"))
+	logger.Printf("PROGRESS_SUITES environment variable: %s\n", os.Getenv("PROGRESS_SUITES"))
+	logger.Printf("Will attempt dry-run discovery for %d suites: %s\n", len(configuredSuites), strings.Join(configuredSuites, ","))
 
 	for _, suiteName := range configuredSuites {
-		suiteName = strings.TrimSpace(suiteName)
-		if suiteName == "" {
-			logger.Printf("Skipping empty suite name\n")
-			continue
-		}
-
 		logger.Printf("Discovering test total for suite: %s\n", suiteName)
 		total := runDryRunForSuite(suiteName, resultsDir)
 		if total > 0 {

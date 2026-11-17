@@ -23,24 +23,15 @@ WIN_IMAGE_DOWNLOAD_URL=${WIN_IMAGE_DOWNLOAD_URL:-""}
 TEKTON_PIPELINE_VERSION=${TEKTON_PIPELINE_VERSION:-""}
 PRIMARY_NETWORK_BINDING_PLUGIN=${PRIMARY_NETWORK_BINDING_PLUGIN:-""}
 
-# Calculate storage size based on test suites (2Gi per suite, 10Gi for tier2)
-IFS=',' read -ra TEST_SUITES_ARRAY <<< "${TEST_SUITES}"
-TOTAL_STORAGE=0
-for suite in "${TEST_SUITES_ARRAY[@]}"; do
-  if [[ "$suite" == "tier2" ]]; then
-    TOTAL_STORAGE=$((TOTAL_STORAGE + 10))
-  else
-    TOTAL_STORAGE=$((TOTAL_STORAGE + 2))
-  fi
-done
-STORAGE_SIZE="${TOTAL_STORAGE}Gi"
+SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# generate.sh lives in manifests/run/; shared helpers are under scripts/
+# shellcheck source=../../scripts/test-suites.sh
+source "${SCRIPT_DIR}/../../scripts/test-suites.sh"
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
-if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
-  echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
-  echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
-  exit 1
-fi
+# Validate and estimate PVC size from resolved Tier-1 / Tier-2 selections
+# (2Gi per Tier-1 SIG, 10Gi once for any Tier-2 selection).
+TOTAL_STORAGE="$(estimate_storage_gi_for_suites "${TEST_SUITES}")" || exit 1
+STORAGE_SIZE="${TOTAL_STORAGE}Gi"
 
 
 TEST_SKIPS=${TEST_SKIPS:-""}

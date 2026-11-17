@@ -4,6 +4,7 @@ set -e
 
 readonly SCRIPT_DIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "${SCRIPT_DIR}/funcs.sh"
+source "${SCRIPT_DIR}/test-suites.sh"
 TEST_KUBEVIRT_SCRIPT="${SCRIPT_DIR}/kubevirt/test-kubevirt.sh"
 
 export GOLDEN_IMAGE_NAMESPACE="${GOLDEN_IMAGE_NAMESPACE:-validation-os-images}"
@@ -223,12 +224,15 @@ cleanup_and_forward_signal() {
 # Set trap to cleanup and forward signals
 trap cleanup_and_forward_signal INT TERM
 
-ALLOWED_TEST_SUITES="compute|network|storage|ssp|tier2"
-if [[ ! "$TEST_SUITES" =~ ^($ALLOWED_TEST_SUITES)(,($ALLOWED_TEST_SUITES))*$ ]]; then
-  echo "Invalid TEST_SUITES format: \"$TEST_SUITES\""
-  echo "Allowed values: comma-separated list of [$ALLOWED_TEST_SUITES]"
+TEST_SUITES=${TEST_SUITES:-"compute,network,storage,ssp,tier2"}
+if ! resolve_test_suites "${TEST_SUITES}"; then
   exit 1
 fi
+echo "Resolved Tier-1 suites: ${RESOLVED_TIER1_SUITES:-<none>}"
+echo "Resolved Tier-2 suites: ${RESOLVED_TIER2_SUITES:-<none>}"
+echo "Tier-2 unrestricted modules: ${TIER2_ALL_MODULES:-false}"
+# Exported for progress_watcher dry-run discovery and tier2 path/marker selection.
+export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES TIER2_ALL_MODULES WINDOWS_ADDED_BY_EULA
 
 
 VALID_FILTER_REGEX='^([^|]+)(\|([^|]+))*$'
@@ -255,18 +259,6 @@ if [[ -n "${TEST_FOCUS}" && -n "${TEST_SKIPS}" ]]; then
     done
   done
 fi
-
-IFS=',' read -ra SUITES <<< "$TEST_SUITES"
-
-suite_enabled() {
-  local target="$1"
-  for suite in "${SUITES[@]}"; do
-    if [[ "$suite" == "$target" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
 
 if [ -z "${STORAGE_CLASS}" ]; then
   STORAGE_CLASS=$(oc get sc -o json | jq -r '[.items[] | select(.metadata.annotations."storageclass.kubernetes.io/is-default-class"=="true")][0]'.metadata.name)
@@ -412,25 +404,38 @@ readonly EXIT_WINDOWS_SKIP=2
 
 WINDOWS_SETUP_SCRIPT="${SCRIPT_DIR}/windows/setup-golden-image.sh"
 if [ -f "${WINDOWS_SETUP_SCRIPT}" ]; then
-  export STORAGE_CLASS
-  export WIN_IMAGE_DOWNLOAD_URL
-  export TEKTON_PIPELINE_VERSION
-  export ACCEPT_WINDOWS_EULA
-  WINDOWS_SETUP_EXIT=0
-  bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
-  case ${WINDOWS_SETUP_EXIT} in
-    0)
-      ;;
-    "${EXIT_WINDOWS_SKIP}")
-      echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
-      echo "All other test suites will continue normally."
-      unset ACCEPT_WINDOWS_EULA
-      ;;
-    *)
-      echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
-      exit 1
-      ;;
-  esac
+  # Tool-managed image creation is expensive. Skip it when Tier-2 Windows is not selected.
+  # Existing Ready DataSources (BYOI / prior runs) are still detected by tier2 itself.
+  if [ "${DRY_RUN}" == "true" ]; then
+    echo "Skipping Windows golden image setup (DRY_RUN=true)."
+  elif ! tier2_windows_setup_needed; then
+    echo "Skipping Windows golden image setup (tier2/windows not selected)."
+  else
+    export STORAGE_CLASS
+    export WIN_IMAGE_DOWNLOAD_URL
+    export TEKTON_PIPELINE_VERSION
+    export ACCEPT_WINDOWS_EULA
+    WINDOWS_SETUP_EXIT=0
+    bash "${WINDOWS_SETUP_SCRIPT}" || WINDOWS_SETUP_EXIT=$?
+    case ${WINDOWS_SETUP_EXIT} in
+      0)
+        ;;
+      "${EXIT_WINDOWS_SKIP}")
+        echo "WARNING: Windows golden image setup skipped (missing prerequisite). Windows tests will be skipped."
+        echo "All other test suites will continue normally."
+        unset ACCEPT_WINDOWS_EULA
+        # Drop Windows that was only implied by EULA so Tier-1-only jobs do not
+        # hard-fail in a leftover windows-only Tier-2 phase.
+        drop_eula_added_windows
+        export RESOLVED_TIER1_SUITES RESOLVED_TIER2_SUITES PROGRESS_SUITES WINDOWS_ADDED_BY_EULA
+        echo "Resolved Tier-2 suites after Windows skip: ${RESOLVED_TIER2_SUITES:-<none>}"
+        ;;
+      *)
+        echo "ERROR: Windows golden image setup failed (exit ${WINDOWS_SETUP_EXIT}). Aborting validation."
+        exit 1
+        ;;
+    esac
+  fi
 fi
 
 # Start progress watcher in background AFTER storage config is set
@@ -440,69 +445,69 @@ PROGRESS_WATCHER_PID=$!
 echo "Progress watcher started with PID: ${PROGRESS_WATCHER_PID}"
 
 # =======
-# compute
+# Tier-1 compute
 # =======
-if suite_enabled "compute"; then
-  echo "Running KubeVirt test suite..."
+if tier1_enabled "compute"; then
+  echo "Running Tier-1 compute (KubeVirt) test suite..."
   SIG="compute" "${TEST_KUBEVIRT_SCRIPT}" &
   CURRENT_TEST_PID=$!
   wait ${CURRENT_TEST_PID}
   CURRENT_TEST_PID=""
-  echo "KubeVirt test suite has finished."
+  echo "Tier-1 compute test suite has finished."
 else
-  echo "KubeVirt test suite has been skipped."
+  echo "Tier-1 compute test suite has been skipped."
 fi
 
 
 # =======
-# Network
+# Tier-1 network
 # =======
-if suite_enabled "network"; then
-  echo "Running Network test suite..."
+if tier1_enabled "network"; then
+  echo "Running Tier-1 network (KubeVirt) test suite..."
   SIG="network" "${TEST_KUBEVIRT_SCRIPT}" &
   CURRENT_TEST_PID=$!
   wait ${CURRENT_TEST_PID}
   CURRENT_TEST_PID=""
-  echo "Network test suite has finished."
+  echo "Tier-1 network test suite has finished."
 else
-  echo "Network test suite has been skipped."
+  echo "Tier-1 network test suite has been skipped."
 fi
 
 
 # =======
-# Storage
+# Tier-1 storage
 # =======
-if suite_enabled "storage"; then
-  echo "Running Storage test suite..."
+if tier1_enabled "storage"; then
+  echo "Running Tier-1 storage (KubeVirt) test suite..."
   SIG="storage" "${TEST_KUBEVIRT_SCRIPT}" &
   CURRENT_TEST_PID=$!
   wait ${CURRENT_TEST_PID}
   CURRENT_TEST_PID=""
-  echo "Storage test suite has finished."
+  echo "Tier-1 storage test suite has finished."
 else
-  echo "Storage test suite has been skipped."
+  echo "Tier-1 storage test suite has been skipped."
 fi
 
 
 # ====
-# SSP
+# Tier-1 SSP
 # ====
-if suite_enabled "ssp"; then
-  echo "Running SSP test suite..."
+if tier1_enabled "ssp"; then
+  echo "Running Tier-1 SSP test suite..."
   ${SCRIPT_DIR}/ssp/test-ssp.sh &
   CURRENT_TEST_PID=$!
   wait ${CURRENT_TEST_PID}
   CURRENT_TEST_PID=""
 else
-  echo "SSP test suite has been skipped."
+  echo "Tier-1 SSP test suite has been skipped."
 fi
 
 
 # =======
 # Tier-2
 # =======
-if suite_enabled "tier2"; then
-  echo "Running Tier-2 (openshift-virtualization-tests) test suite..."
+if tier2_enabled; then
+  echo "Running Tier-2 (openshift-virtualization-tests) suites: ${RESOLVED_TIER2_SUITES}"
   ${SCRIPT_DIR}/tier2/test-tier2.sh &
   CURRENT_TEST_PID=$!
   wait ${CURRENT_TEST_PID}

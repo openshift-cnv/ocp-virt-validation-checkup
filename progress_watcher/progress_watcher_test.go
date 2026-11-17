@@ -1250,21 +1250,28 @@ func TestGetTotalExpectedSuites(t *testing.T) {
 	// Note: This function is no longer used in progress calculation (we use proportional calculation now)
 	// but kept for potential future use cases
 
-	// Save original TEST_SUITES value and restore after test
+	// Save original suite env values and restore after test
 	originalTestSuites := os.Getenv("TEST_SUITES")
+	originalProgressSuites := os.Getenv("PROGRESS_SUITES")
 	defer func() {
 		if originalTestSuites != "" {
 			os.Setenv("TEST_SUITES", originalTestSuites)
 		} else {
 			os.Unsetenv("TEST_SUITES")
 		}
+		if originalProgressSuites != "" {
+			os.Setenv("PROGRESS_SUITES", originalProgressSuites)
+		} else {
+			os.Unsetenv("PROGRESS_SUITES")
+		}
 	}()
 
 	tests := []struct {
-		name          string
-		testSuitesEnv string
-		expectedCount int
-		description   string
+		name             string
+		testSuitesEnv    string
+		progressSuitesEnv string
+		expectedCount    int
+		description      string
 	}{
 		{
 			name:          "Empty env var defaults to 5",
@@ -1308,15 +1315,31 @@ func TestGetTotalExpectedSuites(t *testing.T) {
 			expectedCount: 2,
 			description:   "Should ignore empty values between commas",
 		},
+		{
+			name:          "Hierarchical tier1 and tier2 collapse tier2",
+			testSuitesEnv: "tier1/storage,tier2/storage,tier2/windows",
+			expectedCount: 2,
+			description:   "Multiple tier2 SIGs should count as one tier2 execution unit",
+		},
+		{
+			name:              "PROGRESS_SUITES overrides TEST_SUITES",
+			testSuitesEnv:     "tier1/storage,tier2/storage",
+			progressSuitesEnv: "storage,tier2",
+			expectedCount:     2,
+			description:       "PROGRESS_SUITES from entrypoint should be preferred",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set the environment variable
+			os.Unsetenv("PROGRESS_SUITES")
 			if tt.testSuitesEnv == "" {
 				os.Unsetenv("TEST_SUITES")
 			} else {
 				os.Setenv("TEST_SUITES", tt.testSuitesEnv)
+			}
+			if tt.progressSuitesEnv != "" {
+				os.Setenv("PROGRESS_SUITES", tt.progressSuitesEnv)
 			}
 
 			// Call the function
