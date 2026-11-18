@@ -27,7 +27,7 @@ RUN GOOS=linux CGO_ENABLED=1 go test -c -o bin/ssp.test ./tests
 ################################################################################
 # Build Stage 3: Utilities
 ################################################################################
-FROM docker.io/library/golang:1.23 AS utilities-builder
+FROM docker.io/library/golang:1.26 AS utilities-builder
 
 WORKDIR /workspace
 COPY . .
