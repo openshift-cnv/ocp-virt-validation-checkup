@@ -527,7 +527,10 @@ fi
 # Clean up .dry-run directory if it still exists (used by progress_watcher for test discovery)
 if [ -d "${RESULTS_DIR}/.dry-run" ]; then
     echo "Cleaning up .dry-run directory..."
-    rm -rf "${RESULTS_DIR}/.dry-run"
+    # rm -rf can fail with "Directory not empty" on NFS-backed storage (silly-renamed
+    # .nfs* files); the leftover is excluded from the results archive, so a failure
+    # here is cosmetic and must not fail the whole checkup (set -e).
+    rm -rf "${RESULTS_DIR}/.dry-run" || echo "Warning: failed to remove ${RESULTS_DIR}/.dry-run, ignoring"
 fi
 
 # ================================
