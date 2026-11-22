@@ -1,0 +1,537 @@
+# Windows Server 2022 Golden Image Setup
+#
+# This manifest creates a ready-to-use Windows Server 2022 golden image
+# for the self-validation tool. Pick ONE of the methods below:
+#
+#   Method 1 (default): Tekton pipeline — installs Windows from ISO,
+#     configures SSH, guest agent, Administrator/Administrator via sysprep.
+#     Full automation.
+#
+#   Method 2: DataVolume import — use if you already have a prepared
+#     Windows image (HTTP URL, container registry, or existing PVC).
+#
+# Prerequisites:
+#   - Method 1: OpenShift Pipelines operator + cluster-admin
+#   - Method 2: A prepared Windows image with SSH, guest agent, Administrator/Administrator
+#
+# Usage:
+#   1. Choose your method (see comments below)
+#   2. Apply: oc apply -f manifests/windows/golden-image.yaml
+#   3. Wait:
+#      - Method 1: oc get pipelinerun -n validation-os-images -w (~1-2 hours)
+#      - Method 2: oc get dv win2k22 -n validation-os-images -w
+#   4. Verify it's ready (should print "True"):
+#      oc get datasource win2k22 -n validation-os-images -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+#   5. Run the validation tool
+#
+# Cleanup (if deleting the namespace):
+#   oc delete namespace validation-os-images
+#   oc delete clusterrolebinding validation-pipeline-privileged-scc
+#
+# To retry after pipeline failure:
+#   oc delete pipelinerun win2022-install -n validation-os-images
+#   oc apply -f manifests/windows/golden-image.yaml
+#
+# The resulting image will have:
+#   - OpenSSH server enabled (port 22)
+#   - Administrator password: Administrator
+#   - QEMU guest agent installed
+#   - EFI boot with vTPM support
+#   - Windows Firewall disabled
+#
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: validation-os-images
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: os-images.kubevirt.io:view
+  namespace: validation-os-images
+rules:
+- apiGroups: [""]
+  resources: [persistentvolumeclaims, persistentvolumeclaims/status]
+  verbs: [get, list, watch]
+- apiGroups: [snapshot.storage.k8s.io]
+  resources: [volumesnapshots, volumesnapshots/status]
+  verbs: [get, list, watch]
+- apiGroups: [cdi.kubevirt.io]
+  resources: [datavolumes]
+  verbs: [get, list, watch]
+- apiGroups: [cdi.kubevirt.io]
+  resources: [datavolumes/source]
+  verbs: [create]
+- apiGroups: [cdi.kubevirt.io]
+  resources: [datasources]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [namespaces]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: os-images.kubevirt.io:view
+  namespace: validation-os-images
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: os-images.kubevirt.io:view
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:authenticated
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:serviceaccounts
+---
+# =============================================================================
+# METHOD 1: Tekton Pipeline (default)
+#
+# Installs Windows from ISO with our sysprep. Creates everything from scratch.
+# Requires: OpenShift Pipelines operator, cluster-admin.
+#
+# If using Method 2 instead, comment out or delete this entire section
+# (ServiceAccount, RoleBindings, ConfigMap, PipelineRun).
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline
+  namespace: validation-os-images
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-edit
+  namespace: validation-os-images
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+- kind: ServiceAccount
+  name: pipeline
+  namespace: validation-os-images
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: validation-pipeline-privileged-scc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+- kind: ServiceAccount
+  name: pipeline
+  namespace: validation-os-images
+---
+# NOTE: Keep autounattend.xml and post-update.ps1 in sync with
+# scripts/windows/setup-golden-image.sh (create_autounattend_configmap function)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: win2k22-autounattend
+  namespace: validation-os-images
+data:
+  autounattend.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <SetupUILanguage>
+            <UILanguage>en-US</UILanguage>
+          </SetupUILanguage>
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DriverPaths>
+            <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+              <Path>E:\</Path>
+            </PathAndCredentials>
+          </DriverPaths>
+        </component>
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DiskConfiguration>
+            <WillShowUI>Never</WillShowUI>
+            <Disk wcm:action="add">
+              <CreatePartitions>
+                  <CreatePartition wcm:action="add">
+                      <Order>1</Order>
+                      <Type>EFI</Type>
+                      <Size>100</Size>
+                  </CreatePartition>
+                  <CreatePartition wcm:action="add">
+                      <Order>2</Order>
+                      <Type>MSR</Type>
+                      <Size>16</Size>
+                  </CreatePartition>
+                  <CreatePartition wcm:action="add">
+                      <Order>3</Order>
+                      <Type>Primary</Type>
+                      <Extend>true</Extend>
+                  </CreatePartition>
+              </CreatePartitions>
+              <ModifyPartitions>
+                <ModifyPartition wcm:action="add">
+                    <Order>1</Order>
+                    <PartitionID>1</PartitionID>
+                    <Label>EFI</Label>
+                    <Format>FAT32</Format>
+                </ModifyPartition>
+                <ModifyPartition wcm:action="add">
+                    <Order>2</Order>
+                    <PartitionID>3</PartitionID>
+                    <Label>Windows</Label>
+                    <Letter>C</Letter>
+                    <Format>NTFS</Format>
+                </ModifyPartition>
+              </ModifyPartitions>
+              <DiskID>0</DiskID>
+              <WillWipeDisk>true</WillWipeDisk>
+            </Disk>
+          </DiskConfiguration>
+          <ImageInstall>
+            <OSImage>
+              <InstallFrom>
+                <MetaData wcm:action="add">
+                  <Key>/Image/Index</Key>
+                  <Value>2</Value>
+                </MetaData>
+              </InstallFrom>
+              <InstallTo>
+                <DiskID>0</DiskID>
+                <PartitionID>3</PartitionID>
+              </InstallTo>
+            </OSImage>
+          </ImageInstall>
+          <UserData>
+            <AcceptEula>true</AcceptEula>
+          </UserData>
+        </component>
+      </settings>
+      <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <ComputerName>*</ComputerName>
+        </component>
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <RunSynchronous>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>1</Order>
+              <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff" /f</Path>
+              <Description>Suppress network location dialog</Description>
+            </RunSynchronousCommand>
+          </RunSynchronous>
+        </component>
+      </settings>
+      <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UILanguageFallback>en-US</UILanguageFallback>
+          <UserLocale>en-US</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <UserAccounts>
+            <AdministratorPassword>
+              <Value>Administrator</Value>
+              <PlainText>true</PlainText>
+            </AdministratorPassword>
+          </UserAccounts>
+          <AutoLogon>
+            <Enabled>true</Enabled>
+            <Password>
+              <Value>Administrator</Value>
+              <PlainText>true</PlainText>
+            </Password>
+            <Username>Administrator</Username>
+          </AutoLogon>
+          <TimeZone>UTC</TimeZone>
+          <OOBE>
+            <HideEULAPage>true</HideEULAPage>
+            <HideLocalAccountScreen>true</HideLocalAccountScreen>
+            <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+            <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+            <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+            <NetworkLocation>Work</NetworkLocation>
+            <ProtectYourPC>3</ProtectYourPC>
+          </OOBE>
+          <FirstLogonCommands>
+            <SynchronousCommand wcm:action="add">
+              <Order>1</Order>
+              <CommandLine>PowerShell -ExecutionPolicy Bypass -NoProfile F:\post-update.ps1</CommandLine>
+              <Description>Install SSH and configure system</Description>
+            </SynchronousCommand>
+          </FirstLogonCommands>
+        </component>
+      </settings>
+    </unattend>
+  post-update.ps1: |
+    Start-Transcript -Path "C:\post-update.log" -Force
+    $sshInstalled = $false
+    try {
+      # Install QEMU guest agent (with timeout to avoid hangs)
+      $gaJob = Start-Job { $p = Start-Process msiexec -Wait -PassThru -ArgumentList "/i E:\guest-agent\qemu-ga-x86_64.msi /qn /norestart"; $p.ExitCode }
+      if (-not (Wait-Job $gaJob -Timeout 120)) {
+        Stop-Job $gaJob; Remove-Job $gaJob -Force
+        Write-Host "WARNING: QEMU guest agent installer timed out after 120s -- continuing"
+      } else {
+        $exitCode = Receive-Job $gaJob; Remove-Job $gaJob
+        if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+          Write-Host "WARNING: QEMU guest agent installer exited $exitCode -- continuing"
+        }
+      }
+
+      # Disable Windows Firewall first (ensures VM is reachable regardless of SSH outcome)
+      Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction Stop
+
+      # Wait for network connectivity before OpenSSH install (DHCP + DNS can take time during OOBE)
+      Write-Host "Waiting for network connectivity..."
+      $netReady = $false
+      for ($i = 0; $i -lt 30; $i++) {
+        $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+          Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' }
+        if ($addrs) {
+          Write-Host "IPv4 address acquired: $($addrs[0].IPAddress) on $($addrs[0].InterfaceAlias)"
+          try {
+            [System.Net.Dns]::GetHostAddresses('github.com') | Out-Null
+            Write-Host "DNS resolution verified"
+            $netReady = $true
+            break
+          } catch {
+            Write-Host "  DNS not ready yet (attempt $i)..."
+          }
+        } else {
+          Write-Host "  No IPv4 address yet (attempt $i)..."
+        }
+        Start-Sleep -Seconds 5
+      }
+      if (-not $netReady) {
+        Write-Host "WARNING: Network not fully ready after 150s -- OpenSSH online methods may fail"
+      }
+
+      # Install OpenSSH server with fallback methods
+      try {
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -LimitAccess -ErrorAction Stop
+        Write-Host "OpenSSH installed via local capability store (-LimitAccess)"
+      } catch {
+        Write-Host "OpenSSH local install (-LimitAccess) failed: $($_). Trying online method (300s timeout)..."
+        try {
+          $job = Start-Job { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction Stop }
+          if (-not (Wait-Job $job -Timeout 300)) {
+            Stop-Job $job; Remove-Job $job -Force
+            throw "Add-WindowsCapability online timed out after 300s"
+          }
+          Receive-Job $job -ErrorAction Stop; Remove-Job $job
+          Write-Host "OpenSSH installed via Windows Update (online)"
+        } catch {
+          Write-Host "OpenSSH online install failed: $($_). Trying MSI download fallback..."
+          try {
+            $msi = "$env:TEMP\OpenSSH-Win64-v10.0.0.0.msi"
+            $downloaded = $false
+            # MSI installers are Preview-only (stable releases ship .zip archives only).
+            # When updating, change the cluster/GitHub MSI URLs and $expectedHash atomically.
+            # Verify: (Get-FileHash OpenSSH-Win64-v10.0.0.0.msi -Algorithm SHA256).Hash.ToLower()
+            $expectedHash = 'ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9'
+            # Try in-cluster file server first (plain HTTP, avoids WinHTTP/TLS issues during first boot).
+            $clusterUrl = 'http://openssh-msi-server.validation-os-images.svc.cluster.local:8080/OpenSSH-Win64-v10.0.0.0.msi'
+            Write-Host "Trying in-cluster MSI server: $clusterUrl"
+            $curlArgs = @('-L', '--fail', '-o', $msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', $clusterUrl)
+            $curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+            if ($curlProc.ExitCode -eq 0) {
+              $actualHash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+              if ($actualHash -ne $expectedHash) {
+                Write-Host "In-cluster MSI hash mismatch (got $actualHash). Trying GitHub..."
+                Remove-Item $msi -Force -ErrorAction SilentlyContinue
+              } else {
+                Write-Host "Downloaded MSI from in-cluster server (hash verified)"
+                $downloaded = $true
+              }
+            } else {
+              Write-Host "In-cluster download failed (curl exit $($curlProc.ExitCode)). Falling back to GitHub via curl.exe..."
+            }
+            if (-not $downloaded) {
+              $extUrl = 'https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64-v10.0.0.0.msi'
+              $curlArgs = @('-L', '--fail', '-o', $msi, '--retry', '3', '--retry-delay', '5', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '120', $extUrl)
+              $curlProc = Start-Process -FilePath 'curl.exe' -ArgumentList $curlArgs -Wait -PassThru -NoNewWindow
+              if ($curlProc.ExitCode -ne 0) {
+                throw "curl.exe download failed with exit code $($curlProc.ExitCode)"
+              }
+              $actualHash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+              if ($actualHash -ne $expectedHash) {
+                throw "GitHub MSI hash mismatch (got $actualHash, expected $expectedHash)"
+              }
+              Write-Host "Downloaded MSI from GitHub via curl.exe (hash verified)"
+            }
+            $msiProc = Start-Process msiexec -PassThru -ArgumentList @('/i', $msi, '/qn', '/norestart')
+            if (-not $msiProc.WaitForExit(120000)) {
+              taskkill.exe /PID $msiProc.Id /T /F | Out-Null
+              throw "OpenSSH MSI installer timed out after 120s"
+            }
+            $msiExit = $msiProc.ExitCode
+            if ($msiExit -ne 0 -and $msiExit -ne 3010) {
+              throw "OpenSSH MSI installer failed with exit code $msiExit"
+            }
+            Write-Host "OpenSSH installed via MSI (exit code: $msiExit)"
+          } catch {
+            throw "FATAL: All OpenSSH installation methods failed. Last error: $($_)"
+          }
+        }
+      }
+
+      Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
+      Start-Service sshd -ErrorAction Stop
+      $sshdStatus = (Get-Service sshd).Status
+      if ($sshdStatus -ne 'Running') {
+        throw "FATAL: sshd service is not running (status: $sshdStatus)"
+      }
+      Write-Host "OpenSSH sshd service is running and set to auto-start"
+      $sshInstalled = $true
+
+
+      # Suppress network location wizard and set profile
+      New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Network\NewNetworkWindowOff" -Force | Out-Null
+      Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private -ErrorAction SilentlyContinue
+
+      # Disable Server Manager auto-launch
+      Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager" -Name DoNotOpenServerManagerAtLogon -Value 1
+
+      # Cleanup for smaller image (with timeouts to avoid hangs)
+      Vssadmin delete shadows /all /quiet 2>$null
+      Remove-Item -Path $env:Temp -Recurse -Force -ErrorAction SilentlyContinue
+      powercfg -h off 2>$null
+
+      # DISM can hang -- run with a timeout
+      $dismJob = Start-Job { dism.exe /online /Cleanup-Image /StartComponentCleanup }
+      if (-not (Wait-Job $dismJob -Timeout 300)) {
+        Stop-Job $dismJob
+        Remove-Job $dismJob -Force
+      } else {
+        Remove-Job $dismJob
+      }
+
+      # Rename cached unattend.xml to prevent sysprep issues
+      if (Test-Path "C:\Windows\Panther\unattend.xml") {
+        Rename-Item "C:\Windows\Panther\unattend.xml" "C:\Windows\Panther\unattend.install.xml"
+      }
+
+      # Eject CD
+      try { (New-Object -COMObject Shell.Application).NameSpace(17).ParseName("F:").InvokeVerb("Eject") } catch {}
+    }
+    finally {
+      # Disable Windows Update to prevent it from blocking shutdown
+      Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
+      Set-Service wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
+      if (-not $sshInstalled) {
+        Write-Host "ERROR: post-update.ps1 finished WITHOUT OpenSSH installed"
+      }
+      Stop-Transcript -ErrorAction SilentlyContinue
+      Stop-Computer -Force
+    }
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: win2022-install
+  namespace: validation-os-images
+spec:
+  timeouts:
+    pipeline: "3h"
+  pipelineRef:
+    resolver: hub
+    params:
+      - name: catalog
+        value: redhat-pipelines
+      - name: type
+        value: artifact
+      - name: kind
+        value: pipeline
+      - name: name
+        value: windows-efi-installer
+      - name: version
+        value: "v4.21.0"
+  params:
+    - name: winImageDownloadURL
+      # EDIT: Windows ISO URL. Default is Microsoft evaluation ISO.
+      # Replace with your own ISO URL or internal mirror if needed.
+      value: "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
+    - name: acceptEula
+      value: "true"
+    - name: baseDvName
+      value: "win2k22"
+    - name: instanceTypeName
+      value: "u1.large"
+    - name: instanceTypeKind
+      value: "VirtualMachineClusterInstancetype"
+    - name: preferenceName
+      value: "windows.2k22"
+    - name: autounattendConfigMapName
+      value: "win2k22-autounattend"
+    - name: isoDVName
+      value: "win2k22-iso"
+  taskRunSpecs:
+    - pipelineTaskName: modify-windows-iso-file
+      podTemplate:
+        securityContext:
+          fsGroup: 107
+          runAsUser: 107
+---
+# =============================================================================
+# METHOD 2: DataVolume Import (alternative)
+#
+# Use this INSTEAD of Method 1 if you already have a prepared Windows image.
+# Your image must already have SSH, guest agent, Administrator/Administrator configured.
+#
+# To use: Delete or comment out the Method 1 section above (ServiceAccount,
+# RoleBindings, ConfigMap, PipelineRun), then uncomment the DataVolume below.
+# =============================================================================
+#
+# apiVersion: cdi.kubevirt.io/v1beta1
+# kind: DataVolume
+# metadata:
+#   name: win2k22
+#   namespace: validation-os-images
+# spec:
+#   source:
+#     # --- Option A: HTTP URL ---
+#     http:
+#       url: "https://my-server.example.com/win2k22.qcow2"
+#
+#     # --- Option B: Container registry ---
+#     # registry:
+#     #   url: "docker://registry.example.com/images/win2k22:latest"
+#
+#     # --- Option C: Clone from existing PVC ---
+#     # pvc:
+#     #   name: my-windows-pvc
+#     #   namespace: my-namespace
+#
+#     # --- Option D: Upload from local file ---
+#     # (apply first, then run: virtctl image-upload dv win2k22 -n validation-os-images --image-path=./win2k22.qcow2)
+#     # upload: {}
+#
+#   storage:
+#     resources:
+#       requests:
+#         storage: 60Gi
+#     # storageClassName: my-storage-class
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataSource
+metadata:
+  name: win2k22
+  namespace: validation-os-images
+spec:
+  source:
+    pvc:
+      name: win2k22
+      namespace: validation-os-images

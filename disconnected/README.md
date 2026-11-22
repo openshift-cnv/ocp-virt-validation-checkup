@@ -345,3 +345,42 @@ The script will:
 2. Mirror all required images with `--keep-manifest-list=true` to preserve multi-arch manifest lists
 3. When using `--use-internal-registry`, expose the internal registry route, create the mirror namespace, configure RBAC, and authenticate
 4. Optionally generate and apply both `ImageTagMirrorSet` and `ImageDigestMirrorSet`
+
+## Windows Testing in Disconnected Environments
+
+The automated Windows golden image creation (`ACCEPT_WINDOWS_EULA=true`) requires internet access to download the Windows ISO and fetch the Tekton pipeline from Artifact Hub. It is **not supported** in disconnected environments.
+
+To run Windows tests on a disconnected cluster, provide your own pre-built golden image (BYOI):
+
+### Requirements
+
+Your Windows image must have:
+- **OpenSSH server** installed and set to start automatically (port 22)
+- **QEMU guest agent** installed
+- **Administrator** account with password `Administrator`
+- **Windows Firewall** disabled
+
+### Setup
+
+1. Prepare a Windows Server 2022 image with the requirements above (using your own tooling, ISO, or existing image).
+
+2. Create the namespace with the required Pod Security label:
+```bash
+oc create namespace validation-os-images
+oc label namespace validation-os-images pod-security.kubernetes.io/enforce=privileged
+```
+
+3. Edit `manifests/windows/golden-image.yaml`: comment out the Method 1 (Tekton pipeline) section and uncomment the Method 2 DataVolume section. Set the source to your image location — the manifest documents all supported import options (HTTP URL, container registry, PVC clone, or `virtctl image-upload`). Then apply it:
+```bash
+oc apply -f manifests/windows/golden-image.yaml
+```
+
+4. Verify the DataSource is Ready:
+```bash
+oc get datasource win2k22 -n validation-os-images -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+# Should print: True
+```
+
+6. Run the validation tool **without** `ACCEPT_WINDOWS_EULA`. The tool detects the existing DataSource and runs Windows tests automatically.
+
+**Important:** Do **not** set `ACCEPT_WINDOWS_EULA=true` on disconnected clusters. The tool-managed path requires internet access; it detects the missing hub resolver and skips Windows tests gracefully, but other pipeline failures (ISO download, timeout, SSH verification) will abort the entire validation run.
